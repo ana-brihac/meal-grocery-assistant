@@ -1,0 +1,12 @@
+ml-service:
+  base-url: http://localhost:8000   # or http://ml-service:8000 once you're in docker-compose
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pantrydb
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate # or none/update depending on how the schema is managed
