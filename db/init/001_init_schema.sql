@@ -33,7 +33,8 @@ CREATE TABLE inventory_items (
     id            BIGSERIAL PRIMARY KEY,
     receipt_id    BIGINT REFERENCES receipts(id),
     name          VARCHAR(255) NOT NULL,
-    quantity      NUMERIC,
+    quantity      DECIMAL(10, 2),
     expiry_date   DATE,
+    price         DECIMAL(10, 2),
     added_at      TIMESTAMP NOT NULL DEFAULT now()
 );
