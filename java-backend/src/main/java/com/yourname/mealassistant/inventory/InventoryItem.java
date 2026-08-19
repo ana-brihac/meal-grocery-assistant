@@ -12,7 +12,6 @@ public class InventoryItem {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // TODO: fields — name (String), quantity (Integer), expiryDate (LocalDate, nullable)
     private String name;
     private BigDecimal quantity;
     private LocalDate expiryDate;
@@ -24,7 +23,6 @@ public class InventoryItem {
 
     protected InventoryItem() {} // JPA needs this
 
-    // TODO: real constructor + getters/setters
     public InventoryItem(String name, BigDecimal quantity) {
         this.name = name;
         this.quantity = quantity;
