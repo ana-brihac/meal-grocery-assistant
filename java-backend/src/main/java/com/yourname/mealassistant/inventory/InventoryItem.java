@@ -3,6 +3,7 @@ package com.yourname.mealassistant.inventory;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.math.BigDecimal;
+import com.yourname.mealassistant.receipt.Receipt;
 
 @Entity
 @Table(name = "inventory_items")
@@ -12,20 +13,21 @@ public class InventoryItem {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "receipt_id")
+    private Receipt receipt;
+
     private String name;
     private BigDecimal quantity;
     private LocalDate expiryDate;
-    // Check db/init/001_init_schema.sql — your columns here MUST match that schema
-    
-    // if ddl-auto=validate, or Hibernate will silently diverge from it if =update.
-    
-    // Go check your init script now and make sure column names line up.
+    private BigDecimal price;
 
-    protected InventoryItem() {} // JPA needs this
+    protected InventoryItem() {}
 
-    public InventoryItem(String name, BigDecimal quantity) {
+    public InventoryItem(String name, BigDecimal quantity, BigDecimal price) {
         this.name = name;
         this.quantity = quantity;
+        this.price = price;
     }
 
     public Long getId() { 
@@ -34,6 +36,22 @@ public class InventoryItem {
 
     public void setId(Long id) { 
         this.id = id; 
+    }
+
+    public Receipt getReceipt() {
+        return receipt;
+    }
+
+    public void setReceipt(Receipt receipt) {
+        this.receipt = receipt;
+    }
+
+    public BigDecimal getPrice() { 
+        return price; 
+    }
+
+    public void setPrice(BigDecimal price) { 
+        this.price = price; 
     }
 
     public String getName() { 

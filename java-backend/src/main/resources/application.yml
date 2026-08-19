@@ -1,5 +1,5 @@
 ml-service:
-  base-url: http://localhost:8000   # or http://ml-service:8000 once you're in docker-compose
+  base-url: http://localhost:8000
 
 spring:
   datasource:
@@ -9,4 +9,8 @@ spring:
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: validate # or none/update depending on how the schema is managed
+      ddl-auto: validate 
+
+ocr:
+  api-url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
+  api-key: "__SCRUBBED__"
