@@ -14,3 +14,7 @@ spring:
 ocr:
   api-url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
   api-key: "__SCRUBBED__"
+
+usda:
+  api-url: "https://api.nal.usda.gov/fdc/v1"
+  api-key: "__SCRUBBED__"

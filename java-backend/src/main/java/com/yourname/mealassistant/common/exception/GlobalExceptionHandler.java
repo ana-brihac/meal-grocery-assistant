@@ -15,4 +15,11 @@ public class GlobalExceptionHandler {
             .status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(ApiResponse.fail(e.getMessage()));
 	}
+
+	@ExceptionHandler(NutritionApiException.class)
+   	public ResponseEntity<ApiResponse<Void>> handleNutritionApi(NutritionApiException e) {
+		return ResponseEntity
+            .status(HttpStatus.BAD_GATEWAY) 
+            .body(ApiResponse.fail(e.getMessage()));
+	}
 }
