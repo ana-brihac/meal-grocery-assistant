@@ -28,7 +28,7 @@ public class Receipt {
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    protected Receipt() {}
+    public Receipt() {}
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
