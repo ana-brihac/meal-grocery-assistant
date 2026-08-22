@@ -9,6 +9,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -26,6 +27,9 @@ class NutritionServiceTest {
     @InjectMocks NutritionService service;
 
     private NutritionInfo cachedChicken;
+
+    private static final LocalDateTime FROM = LocalDateTime.of(2026, 8, 1, 0, 0);
+    private static final LocalDateTime TO   = LocalDateTime.of(2026, 8, 31, 23, 59, 59);
 
     @BeforeEach
     void setUp() {
@@ -80,9 +84,9 @@ class NutritionServiceTest {
 
     @Test
     void getSummary_noLogs_returnsZeroTotals() {
-        when(nutritionLogRepository.findByUserId(1L)).thenReturn(List.of());
+        when(nutritionLogRepository.findByUserIdAndLoggedAtBetween(1L, FROM, TO)).thenReturn(List.of());
 
-        NutritionSummaryResponse result = service.getSummary(1L);
+        NutritionSummaryResponse result = service.getSummary(1L, FROM, TO);
 
         assertThat(result.getTotalCalories()).isEqualTo(0.0);
         assertThat(result.getTotalProtein()).isEqualTo(0.0);
@@ -96,10 +100,10 @@ class NutritionServiceTest {
         log.setItemName("chicken");
         log.setQuantityGrams(200.0);
 
-        when(nutritionLogRepository.findByUserId(1L)).thenReturn(List.of(log));
+        when(nutritionLogRepository.findByUserIdAndLoggedAtBetween(1L, FROM, TO)).thenReturn(List.of(log));
         when(nutritionInfoRepository.findById("chicken")).thenReturn(Optional.of(cachedChicken));
 
-        NutritionSummaryResponse result = service.getSummary(1L);
+        NutritionSummaryResponse result = service.getSummary(1L, FROM, TO);
 
         // 200g / 100g = 2x multiplier => 165 * 2 = 330 calories
         assertThat(result.getTotalCalories()).isEqualTo(330.0);

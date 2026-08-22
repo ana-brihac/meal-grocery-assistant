@@ -41,3 +41,6 @@ receipttest.png
 *.png
 *.jpg
 *.jpeg
+
+# Environment secrets - never commit
+.env

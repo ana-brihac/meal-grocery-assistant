@@ -6,6 +6,7 @@ import com.yourname.mealassistant.spending.dto.SpendingSummaryResponse;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -17,11 +18,11 @@ public class SpendingService {
         this.receiptRepository = receiptRepository;
     }
 
-    public SpendingSummaryResponse getSpendingSummary(Long userId) {
+    public SpendingSummaryResponse getSpendingSummary(Long userId, LocalDate from, LocalDate to) {
         SpendingSummaryResponse total = new SpendingSummaryResponse();
         BigDecimal totalPrice = BigDecimal.ZERO;
         
-        List<Receipt> receipts = receiptRepository.findByUserId(userId);
+        List<Receipt> receipts = receiptRepository.findByUserIdAndReceiptDateBetween(userId, from, to);
         
         for (Receipt x : receipts) {
             if (x.getTotalAmount() != null) {

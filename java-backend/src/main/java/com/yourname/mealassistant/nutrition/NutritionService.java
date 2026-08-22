@@ -1,7 +1,12 @@
 package com.yourname.mealassistant.nutrition;
 
 import com.yourname.mealassistant.common.client.NutritionApiClient;
+import com.yourname.mealassistant.common.util.ItemNameNormalizer;
+import com.yourname.mealassistant.nutrition.dto.NutritionSummaryResponse;
 import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 public class NutritionService {
@@ -19,13 +24,14 @@ public class NutritionService {
     }
 
     public NutritionInfo getOrFetchNutritionInfo(String foodName) {
-        return nutritionInfoRepository.findById(foodName).orElseGet(() -> {
+        String normalized = ItemNameNormalizer.normalize(foodName);
+        return nutritionInfoRepository.findById(normalized).orElseGet(() -> {
             
-            var searchResponse = nutritionApiClient.searchFoodByName(foodName);
+            var searchResponse = nutritionApiClient.searchFoodByName(normalized);
             
             NutritionInfo newInfo = new NutritionInfo();
 
-            newInfo.setItemName(foodName);
+            newInfo.setItemName(normalized);
             newInfo.setBaseQuantity(100.0);
             
             if (searchResponse != null && searchResponse.getFoods() != null && !searchResponse.getFoods().isEmpty()) {
@@ -67,14 +73,13 @@ public class NutritionService {
         nutritionLogRepository.save(logEntry);
     }
     
-    public com.yourname.mealassistant.nutrition.dto.NutritionSummaryResponse getSummary(Long userId) {
-        var summary = new com.yourname.mealassistant.nutrition.dto.NutritionSummaryResponse();
+    public NutritionSummaryResponse getSummary(Long userId, LocalDateTime from, LocalDateTime to) {
+        var summary = new NutritionSummaryResponse();
         
-        java.util.List<NutritionLog> logs = nutritionLogRepository.findByUserId(userId);
+        List<NutritionLog> logs = nutritionLogRepository.findByUserIdAndLoggedAtBetween(userId, from, to);
 
         for (NutritionLog log : logs) {
             nutritionInfoRepository.findById(log.getItemName()).ifPresent(info -> {
-                
                 double multiplier = log.getQuantityGrams() / info.getBaseQuantity();
 
                 if (info.getCalories() != null) summary.addCalories(info.getCalories() * multiplier);

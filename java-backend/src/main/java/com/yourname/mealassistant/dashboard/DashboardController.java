@@ -5,8 +5,11 @@ import com.yourname.mealassistant.nutrition.NutritionService;
 import com.yourname.mealassistant.nutrition.dto.NutritionSummaryResponse;
 import com.yourname.mealassistant.spending.SpendingService;
 import com.yourname.mealassistant.spending.dto.SpendingSummaryResponse;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/dashboard")
@@ -21,9 +24,12 @@ public class DashboardController {
     }
 
     @GetMapping("/summary")
-    public ResponseEntity<DashboardSummaryResponse> getDashboardSummary(@RequestParam Long userId) {
-        NutritionSummaryResponse nutrition = nutritionService.getSummary(userId);
-        SpendingSummaryResponse spending = spendingService.getSpendingSummary(userId);
+    public ResponseEntity<DashboardSummaryResponse> getDashboardSummary(
+            @RequestParam Long userId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        NutritionSummaryResponse nutrition = nutritionService.getSummary(userId, from.atStartOfDay(), to.atTime(23, 59, 59));
+        SpendingSummaryResponse spending = spendingService.getSpendingSummary(userId, from, to);
         
         DashboardSummaryResponse combinedData = new DashboardSummaryResponse(nutrition, spending);
         

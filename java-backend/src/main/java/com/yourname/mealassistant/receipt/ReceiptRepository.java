@@ -8,4 +8,5 @@ import java.util.List;
 @Repository
 public interface ReceiptRepository extends JpaRepository<Receipt, Long> {
     List<Receipt> findByUserId(Long userId);
+    List<Receipt> findByUserIdAndReceiptDateBetween(Long userId, java.time.LocalDate from, java.time.LocalDate to);
 }
