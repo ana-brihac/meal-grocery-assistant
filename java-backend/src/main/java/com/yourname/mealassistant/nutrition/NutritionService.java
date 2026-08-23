@@ -67,7 +67,7 @@ public class NutritionService {
         NutritionLog logEntry = new NutritionLog();
 
         logEntry.setUserId(userId);
-        logEntry.setItemName(foodName);
+        logEntry.setItemName(info.getItemName());
         logEntry.setQuantityGrams(quantityGrams);
         
         nutritionLogRepository.save(logEntry);

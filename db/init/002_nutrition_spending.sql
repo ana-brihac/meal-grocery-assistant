@@ -1,11 +1,11 @@
 CREATE TABLE nutrition_info (
 	item_name 		VARCHAR(255) NOT NULL PRIMARY KEY,
-	base_quantity 	DECIMAL(10, 2),
-	calories		NUMERIC,
-	protein			DECIMAL(10, 2),
-	fibers			DECIMAL(10, 2),
-	fats			DECIMAL(10, 2),
-	carbs			DECIMAL(10, 2),
+	base_quantity 	DOUBLE PRECISION,
+	calories		DOUBLE PRECISION,
+	protein			DOUBLE PRECISION,
+	fibers			DOUBLE PRECISION,
+	fats			DOUBLE PRECISION,
+	carbs			DOUBLE PRECISION,
 	created_at    	TIMESTAMP NOT NULL DEFAULT now()
 );
 
@@ -13,7 +13,7 @@ CREATE TABLE nutrition_log (
 	id 				BIGSERIAL PRIMARY KEY,
 	user_id 		BIGINT REFERENCES users(id),
 	item_name 		VARCHAR(255),
-	quantity_grams	DECIMAL(10, 2),
+	quantity_grams	DOUBLE PRECISION,
 	logged_at    	TIMESTAMP NOT NULL DEFAULT now()
 );
 

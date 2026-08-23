@@ -27,6 +27,7 @@ public class NutritionApiClient {
             .uri(uriBuilder -> uriBuilder
                 .path("/foods/search")
                 .queryParam("query", foodName)
+                .queryParam("pageSize", 5)
                 .queryParam("api_key", apiKey)
                 .build())
             .retrieve()
