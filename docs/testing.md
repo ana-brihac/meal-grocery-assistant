@@ -29,6 +29,11 @@ areas. `ReceiptParser` in particular has non-trivial logic (markdown-fence strip
 bare-array and `{"items": [...]}` shapes, defaulting missing fields) that would benefit from tests
 given it's parsing untrusted LLM output.
 
+Also uncovered, and with no empty stub file even flagging it: `UserPreferenceService` (defaults
+fallback, single-row upsert) and `NutritionService.getDailyBreakdown` (per-day grouping, zero-log-day
+backfill) — both added for the preferences/nutrition-calendar feature, both worth real tests given
+the day-boundary and null-macro edge cases involved.
+
 There is no CI configured (no `.github/workflows` or equivalent) — `mvn test` only runs when someone
 runs it locally.
 

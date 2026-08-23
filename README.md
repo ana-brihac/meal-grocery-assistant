@@ -38,10 +38,10 @@ docs/           Architecture and setup notes
    docker-compose up -d postgres
    ```
 
-   This applies `db/init/001_init_schema.sql` and `002_nutrition_spending.sql` on first boot. If you're
-   reusing an existing `pantry_pg_data` volume from before the nutrition/spending tables existed, the
-   init scripts won't rerun automatically — apply `002_nutrition_spending.sql` by hand against the
-   running container in that case.
+   This applies `db/init/001_init_schema.sql`, `002_nutrition_spending.sql`, and
+   `004_user_preference.sql` on first boot. If you're reusing an existing `pantry_pg_data` volume from
+   before one of these tables existed, its init script won't rerun automatically — apply it by hand
+   against the running container in that case.
 
 3. Run the backend from `java-backend/`:
 
@@ -61,8 +61,10 @@ docs/           Architecture and setup notes
 | `/api/inventory` | GET / POST | List / add inventory items |
 | `/api/nutrition/log` | POST | Log a food item + quantity (grams) eaten by a user |
 | `/api/nutrition/summary` | GET (`userId`, `from`, `to` as ISO datetimes) | Aggregated macros over a date range |
+| `/api/nutrition/calendar` | GET (`start`, `end` as ISO dates) | Per-day macro breakdown over a date range, one entry per calendar day (zero-log days included) |
 | `/api/spending/summary` | GET (`userId`, `from`, `to` as ISO dates) | Total receipt spend over a date range |
 | `/api/dashboard/summary` | GET (`userId`, `from`, `to` as ISO dates) | Combined nutrition + spending summary |
+| `/api/preferences` | GET / PUT | Read / update daily calorie-protein-fiber targets and weekly budget (single-user, one row) |
 
 Nutrition lookups are cached: the first time an item name is logged, `NutritionService` normalizes it
 (lowercased, quantity tokens like `1L`/`200g` stripped) and looks it up in `nutrition_info`; on a miss it

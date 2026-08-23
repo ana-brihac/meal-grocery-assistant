@@ -48,9 +48,26 @@ passing while the real thing is broken) can easily recur:
 - **`ReceiptParser` swallows parse failures silently.** Catches `Exception` broadly, logs to
   stderr, returns an empty list — combined with the point above, a malformed Gemini response just
   results in "0 items added" with no visible error anywhere.
-- **Inconsistent API response shape.** `ReceiptController`/`InventoryController` wrap responses in
-  `ApiResponse<T>`; `NutritionController`/`SpendingController`/`DashboardController` return raw
-  DTOs. No documented convention for which new endpoints should use.
+- **Inconsistent API response shape.** `ReceiptController`/`InventoryController`/
+  `UserPreferenceController` wrap responses in `ApiResponse<T>`; `SpendingController`/
+  `DashboardController` return raw DTOs. `NutritionController` is now inconsistent with *itself*:
+  `/summary` and `/log` return raw DTOs, `/calendar` (added alongside `preference`) returns
+  `ApiResponse<T>`. No documented convention for which new endpoints should use — see
+  `docs/backend-api.md`.
+- **`/api/nutrition/calendar` has no `userId` param**, unlike every other nutrition/spending
+  endpoint. `NutritionService.getDailyBreakdown` queries all `nutrition_log` rows in the date range
+  across all users via `findAll()`, not scoped to one user. Harmless for a single-user app, but a
+  real correctness gap (and an unindexed full-table scan) if multi-user support ever happens.
+- **`user_preference` single-row invariant is enforced only in application code**, not the DB or
+  JPA layer. `UserPreferenceService.savePreferences` pins new rows to `id=1`, but nothing stops a
+  second row from being inserted through a different code path (e.g. calling
+  `userPreferenceRepository.save(new UserPreference(...))` directly with no id set). Also,
+  `004_user_preference.sql` seeds `id=1` explicitly, so the `BIGSERIAL` sequence backing it never
+  advances — if that row is ever deleted and a fresh insert relies on `IDENTITY` generation instead
+  of the pinned id, Postgres could try to reuse `id=1` and collide. See `docs/database.md`.
+- **No test coverage for the new preferences/nutrition-calendar work**: `UserPreferenceService` and
+  `NutritionService.getDailyBreakdown` have no tests at all (not even empty stub files). See
+  `docs/testing.md`.
 - **`java-backend/target/` build artifacts are tracked in git** despite `target/` being in
   `.gitignore` — leftover from before the ignore rule was added (`git rm --cached` was never run).
   Produces noisy, meaningless diffs when built on a different machine or OS.
