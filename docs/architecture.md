@@ -40,9 +40,10 @@ tracks spending against their receipts.
 | `receipt` | `Receipt` entity, upload endpoint, async OCR→parse→save pipeline |
 | `receipt.parser` | `ReceiptParser` — turns Gemini's JSON text into `InventoryItem` rows |
 | `inventory` | `InventoryItem` entity, list/add endpoints, ml-service ping passthrough |
-| `nutrition` | Food logging, USDA-backed nutrition lookup + cache, date-range summary |
+| `nutrition` | Food logging, USDA-backed nutrition lookup + cache, date-range summary, per-day calendar breakdown |
 | `spending` | Date-range spend summary over `receipts` |
 | `dashboard` | Combines nutrition + spending summaries into one response |
+| `preference` | `UserPreference` entity (daily calorie/protein/fiber targets, weekly budget), single-row read/upsert |
 | `common.client` | External HTTP clients: `OcrClient` (Gemini), `NutritionApiClient` (USDA), `MlServiceClient` |
 | `common.dto` | `ApiResponse<T>` — success/data/error envelope (only used by some controllers, see below) |
 | `common.exception` | `GlobalExceptionHandler` — catches `NutritionApiException` → 502, everything else → 500 |
@@ -71,11 +72,31 @@ details and its rough edges.
 `SpendingService.getSpendingSummary` and wraps both in one response — no independent logic of
 its own.
 
+**Nutrition calendar**:
+`GET /api/nutrition/calendar` (`NutritionService.getDailyBreakdown`) is a per-day version of the
+same idea as `getSummary`, but iterates every calendar day in `[start, end]` and sums only that
+day's logs into a `DailyNutritionSummary`, instead of summing the whole range into one total. Days
+with no logs still come back as a zero-totals entry (empty `entries` list) rather than being
+omitted, so a calendar UI never has to handle a missing day. It queries `nutrition_log` without a
+`userId` filter — see the caveat in `docs/backend-api.md`.
+
+**User preferences**:
+`UserPreferenceService` treats `user_preference` as a single-row table — `savePreferences` always
+upserts against `id=1` rather than creating a new row per call. `getPreferences` falls back to
+hardcoded defaults (2000 cal / 100g protein / 30g fiber / 100 budget) if the row doesn't exist,
+which matters because `db/init/004_user_preference.sql` seeds that same row at schema-init time —
+the code fallback only kicks in if that seed is ever skipped or the row is deleted.
+
 ## Conventions worth knowing
 
-- `ApiResponse<T>` (`{success, data, error}`) is used by `ReceiptController` and
-  `InventoryController`, but **not** by `NutritionController`, `SpendingController`, or
-  `DashboardController`, which return raw DTOs or `ResponseEntity<Void>`. There's no single
-  consistent response envelope across the API — check the controller you're calling.
+- `ApiResponse<T>` (`{success, data, error}`) is used by `ReceiptController`, `InventoryController`,
+  `UserPreferenceController`, and `NutritionController`'s `/calendar` endpoint, but **not** by
+  `NutritionController`'s `/summary`/`/log`, `SpendingController`, or `DashboardController`, which
+  return raw DTOs or `ResponseEntity<Void>`. There's still no single consistent response envelope
+  across the API — check the specific endpoint you're calling, not just the controller.
 - Services are plain constructor-injected `@Service`/`@Component` beans, no interfaces, no
   builders — straightforward to read and extend.
+- `UserPreference` enforces its single-row assumption only in `UserPreferenceService` logic
+  (pinning `id=1` on insert) — nothing at the DB or JPA layer actually prevents a second row from
+  being inserted through some other path (e.g. `userPreferenceRepository.save(new UserPreference())`
+  called directly with no id set, relying on `IDENTITY` generation).

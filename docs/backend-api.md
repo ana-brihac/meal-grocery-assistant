@@ -13,13 +13,23 @@ package layout and `docs/database.md` for persistence.
 | `/api/inventory/ping-python` | GET | — | `ApiResponse<String>` — proxies `ml-service`'s `/ping` |
 | `/api/nutrition/log` | POST | `{userId, itemName, quantityGrams}` (`LogMealRequest`) | `201`, empty body |
 | `/api/nutrition/summary` | GET | `userId`, `from`, `to` (ISO-8601 datetimes, e.g. `2026-08-01T00:00:00`) | `NutritionSummaryResponse` (raw, not wrapped) |
+| `/api/nutrition/calendar` | GET | `start`, `end` (ISO-8601 dates, e.g. `2026-08-01`) — no `userId` | `ApiResponse<List<DailyNutritionSummary>>` — one entry per calendar day in range, zero-log days included as zero-totals |
 | `/api/spending/summary` | GET | `userId`, `from`, `to` (ISO-8601 dates, e.g. `2026-08-01`) | `SpendingSummaryResponse` (raw, not wrapped) |
 | `/api/dashboard/summary` | GET | `userId`, `from`, `to` (ISO-8601 dates) | `{nutrition: NutritionSummaryResponse, spending: SpendingSummaryResponse}` |
+| `/api/preferences` | GET | — | `ApiResponse<UserPreference>` — falls back to defaults (2000 cal / 100g protein / 30g fiber / 100 budget) if no row exists yet |
+| `/api/preferences` | PUT | `UserPreference` body | `ApiResponse<UserPreference>` — upserts the single row (always `id=1`, see `docs/database.md`) |
 
-Note the inconsistency: receipts/inventory responses are wrapped in
+Note the inconsistency: receipts/inventory/preferences responses are wrapped in
 `ApiResponse<T> {success, data, error}`; nutrition/spending/dashboard return raw DTOs directly.
-There isn't a project-wide convention here yet — match whatever the controller you're touching
-already does.
+`NutritionController` itself is now split down the middle — `/summary` and `/log` are raw,
+`/calendar` is wrapped — since `/calendar` was added after `preference` established the
+`ApiResponse` pattern for new endpoints. There still isn't a project-wide convention — match
+whatever the specific endpoint you're touching already does.
+
+`/api/nutrition/calendar` also doesn't take a `userId`, unlike every other nutrition/spending
+endpoint — `NutritionService.getDailyBreakdown` queries all `nutrition_log` rows in the date range
+across all users, not just one. Fine for a single-user app in practice, but a real gap if
+multi-user support ever happens.
 
 ## Error handling
 
