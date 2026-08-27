@@ -5,7 +5,9 @@
 A grocery-receipt-to-nutrition tracker. Upload a receipt photo → it's OCR'd (Gemini) and parsed
 into inventory items. Separately, log what you ate → the app looks up nutrition facts (USDA
 FoodData Central, cached locally) and lets you pull date-range summaries of nutrition and spending,
-combined into one dashboard endpoint.
+combined into one dashboard endpoint. Phase 4 added recipes: search for recipes fully makeable from
+a list of ingredients, and log a recipe eaten (sums nutrition across its ingredients, scaled by
+servings).
 
 ## Architecture at a glance
 
@@ -19,6 +21,7 @@ combined into one dashboard endpoint.
 ```
 receipt image → java-backend → Gemini (OCR) → inventory_items
 nutrition log → java-backend → USDA FoodData Central (cached) → nutrition_info / nutrition_log
+recipe search → java-backend → recipes / recipe_ingredients (loaded from a CSV on startup)
                        ↓
                   Postgres (pantrydb)
 ```
@@ -46,6 +49,15 @@ curl -X POST http://localhost:8080/api/nutrition/log \
 
 A `201` means Postgres, the schema, and the USDA integration are all working. Full setup detail,
 including a caveat about reusing an old Postgres volume: [`docs/setup.md`](docs/setup.md).
+
+For recipes specifically, add `java-backend/src/main/resources/data/recipes.csv` (see
+`RecipeDataLoader.java` for the column format) before starting the backend, then:
+
+```
+curl "http://localhost:8080/api/recipes/search?ingredients=<name>&ingredients=<name>"
+```
+
+See `docs/testing.md`'s Recipes section for the full manual verification checklist.
 
 ## Where to go next
 

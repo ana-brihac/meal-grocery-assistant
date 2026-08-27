@@ -5,8 +5,9 @@ inventory items, then track nutrition and spending against it.
 
 ## Stack
 
-- **java-backend** — Spring Boot 3.3.4 (Java 21) REST API. Owns receipts, inventory, nutrition, and
-  spending. Talks to the USDA FoodData Central API for nutrition lookups and to Gemini for receipt OCR.
+- **java-backend** — Spring Boot 3.3.4 (Java 21) REST API. Owns receipts, inventory, nutrition,
+  spending, and recipes. Talks to the USDA FoodData Central API for nutrition lookups and to Gemini
+  for receipt OCR.
 - **ml-service** — Python service used by the backend for auxiliary ML tasks.
 - **Postgres 16** — primary datastore, schema-managed via the SQL scripts in `db/init`.
 
@@ -38,12 +39,17 @@ docs/           Architecture and setup notes
    docker-compose up -d postgres
    ```
 
-   This applies `db/init/001_init_schema.sql`, `002_nutrition_spending.sql`, and
+   This applies `db/init/001_init_schema.sql`, `002_nutrition_spending.sql`, `003_recipes.sql`, and
    `004_user_preference.sql` on first boot. If you're reusing an existing `pantry_pg_data` volume from
    before one of these tables existed, its init script won't rerun automatically — apply it by hand
-   against the running container in that case.
+   against the running container in that case (see `docs/setup.md`).
 
-3. Run the backend from `java-backend/`:
+3. Optional: add a recipe dataset at `java-backend/src/main/resources/data/recipes.csv` (one row
+   per ingredient — see `RecipeDataLoader.java` for the exact column format). The app boots fine
+   without it; `/api/recipes/search` just returns nothing until it's added. It loads automatically
+   on the next backend startup, once (won't reload/duplicate on later restarts).
+
+4. Run the backend from `java-backend/`:
 
    ```
    mvn spring-boot:run
@@ -65,6 +71,11 @@ docs/           Architecture and setup notes
 | `/api/spending/summary` | GET (`userId`, `from`, `to` as ISO dates) | Total receipt spend over a date range |
 | `/api/dashboard/summary` | GET (`userId`, `from`, `to` as ISO dates) | Combined nutrition + spending summary |
 | `/api/preferences` | GET / PUT | Read / update daily calorie-protein-fiber targets and weekly budget (single-user, one row) |
+| `/api/recipes/search` | GET (`ingredients`, repeated) | Recipes fully makeable from the given ingredients — every ingredient the recipe needs must be in the list, not just "any overlap" |
+| `/api/nutrition/log-recipe` | POST | Log a recipe eaten (`recipeId`, `servings`) — writes one nutrition log row per ingredient, scaled by servings |
+
+Recipes are loaded from a CSV (`java-backend/src/main/resources/data/recipes.csv`) by
+`RecipeDataLoader` on backend startup — see the Setup section above.
 
 Nutrition lookups are cached: the first time an item name is logged, `NutritionService` normalizes it
 (lowercased, quantity tokens like `1L`/`200g` stripped) and looks it up in `nutrition_info`; on a miss it

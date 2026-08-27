@@ -12,12 +12,14 @@ package layout and `docs/database.md` for persistence.
 | `/api/inventory` | POST | `{name, quantity}` (`ItemRequest`) | `201`, `ApiResponse<InventoryItem>` |
 | `/api/inventory/ping-python` | GET | — | `ApiResponse<String>` — proxies `ml-service`'s `/ping` |
 | `/api/nutrition/log` | POST | `{userId, itemName, quantityGrams}` (`LogMealRequest`) | `201`, empty body |
+| `/api/nutrition/log-recipe` | POST | `{recipeId, servings}` (`LogRecipeRequest`) | `201`, empty body — writes one `nutrition_log` row per recipe ingredient, no `userId` (see `NutritionService.logRecipe`) |
 | `/api/nutrition/summary` | GET | `userId`, `from`, `to` (ISO-8601 datetimes, e.g. `2026-08-01T00:00:00`) | `NutritionSummaryResponse` (raw, not wrapped) |
 | `/api/nutrition/calendar` | GET | `start`, `end` (ISO-8601 dates, e.g. `2026-08-01`) — no `userId` | `ApiResponse<List<DailyNutritionSummary>>` — one entry per calendar day in range, zero-log days included as zero-totals |
 | `/api/spending/summary` | GET | `userId`, `from`, `to` (ISO-8601 dates, e.g. `2026-08-01`) | `SpendingSummaryResponse` (raw, not wrapped) |
 | `/api/dashboard/summary` | GET | `userId`, `from`, `to` (ISO-8601 dates) | `{nutrition: NutritionSummaryResponse, spending: SpendingSummaryResponse}` |
 | `/api/preferences` | GET | — | `ApiResponse<UserPreference>` — falls back to defaults (2000 cal / 100g protein / 30g fiber / 100 budget) if no row exists yet |
 | `/api/preferences` | PUT | `UserPreference` body | `ApiResponse<UserPreference>` — upserts the single row (always `id=1`, see `docs/database.md`) |
+| `/api/recipes/search` | GET | `ingredients` (repeated, e.g. `?ingredients=egg&ingredients=milk`) — no `userId` (decided, see below) | `ApiResponse<RecipeSearchResponse>` — only recipes whose *entire* ingredient list is covered by `ingredients` (not "any overlap"), ordered fewest-ingredients-first |
 
 Note the inconsistency: receipts/inventory/preferences responses are wrapped in
 `ApiResponse<T> {success, data, error}`; nutrition/spending/dashboard return raw DTOs directly.
@@ -30,6 +32,11 @@ whatever the specific endpoint you're touching already does.
 endpoint — `NutritionService.getDailyBreakdown` queries all `nutrition_log` rows in the date range
 across all users, not just one. Fine for a single-user app in practice, but a real gap if
 multi-user support ever happens.
+
+`/api/recipes/search` deliberately has no `userId` either (decided during Phase 4) — the app is
+single-tenant in practice today, so `RecipeService` doesn't scope by user. `/api/nutrition/log-recipe`
+has the same gap for the same reason — no `userId` in the request, so those `nutrition_log` rows
+are saved with `user_id = null` (see `docs/database.md`).
 
 ## Error handling
 

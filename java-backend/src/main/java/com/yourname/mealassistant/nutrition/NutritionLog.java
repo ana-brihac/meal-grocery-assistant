@@ -18,10 +18,14 @@ public class NutritionLog {
     private String itemName;
 
     @Column(name = "quantity_grams")
-    private Double quantityGrams; 
-    
+    private Double quantityGrams;
+
     @Column(name = "logged_at")
     private LocalDateTime loggedAt = LocalDateTime.now();
+
+    // Nullable — only set when this entry came from NutritionService.logRecipe(), not logMeal().
+    @Column(name = "recipe_id")
+    private Long recipeId;
 
     public NutritionLog() {}
 
@@ -30,6 +34,9 @@ public class NutritionLog {
 
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }
+
+    public Long getRecipeId() { return recipeId; }
+    public void setRecipeId(Long recipeId) { this.recipeId = recipeId; }
 
     public String getItemName() { return itemName; }
     public void setItemName(String itemName) { this.itemName = itemName; }

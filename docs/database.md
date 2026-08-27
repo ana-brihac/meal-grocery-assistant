@@ -8,6 +8,8 @@ hand-written SQL under `db/init/`, applied by the official Postgres image's
 - `db/init/001_init_schema.sql` — `users`, `recipes`, `meals`, `receipts`, `inventory_items`
 - `db/init/002_nutrition_spending.sql` — `nutrition_info`, `nutrition_log`, plus an index on
   `receipts.receipt_date`
+- `db/init/003_recipes.sql` — extends `recipes` with `source` (Phase 4, `recipe_ingredients` table),
+  adds `nutrition_log.recipe_id`, plus indexes on `recipe_ingredients`
 - `db/init/004_user_preference.sql` — `user_preference`, seeded with one default row (`id=1`)
 
 Hibernate is configured with `ddl-auto: validate` (`application.yml`) — it will refuse to start the
@@ -24,12 +26,13 @@ with mocked repositories won't).
 | Table | Key columns | Notes |
 |---|---|---|
 | `users` | `id`, `username` (unique), `email` (unique) | Referenced by `meals`, `receipts`, `nutrition_log` |
-| `recipes` | `id`, `name`, `instructions` | Not currently exposed by any endpoint |
-| `meals` | `user_id` → `users`, `recipe_id` → `recipes`, `planned_date` | Not currently exposed by any endpoint |
+| `recipes` | `id`, `name`, `instructions`, `source` (added by `003_recipes.sql`) | Read by `GET /api/recipes/search` via `RecipeRepository.findRecipesMakeableFrom` |
+| `recipe_ingredients` | `recipe_id` → `recipes`, `ingredient_name`, `quantity` (**grams**, not unit-converted — see note below), `unit` (display-only) | Populated by `RecipeDataLoader` from `src/main/resources/data/recipes.csv` (see that class for the expected CSV format) on startup |
+| `meals` | `user_id` → `users`, `recipe_id` → `recipes`, `planned_date` | Not currently exposed by any endpoint — not wired into the Phase 4 recipe feature either |
 | `receipts` | `user_id` → `users`, `store_name`, `total_amount` (numeric), `receipt_date` | Populated by the async receipt-upload pipeline; `spending` summary reads from here |
 | `inventory_items` | `receipt_id` → `receipts` (nullable), `name`, `quantity`, `price`, `expiry_date` | Also populated directly via `POST /api/inventory` (no receipt link in that case) |
 | `nutrition_info` | `item_name` (PK, **normalized** food name), `base_quantity`, `calories`, `protein`, `fibers`, `fats`, `carbs` | Cache of USDA lookups, one row per normalized item name; nullable macros mean "USDA had no match" |
-| `nutrition_log` | `user_id` → `users`, `item_name` (normalized, matches `nutrition_info.item_name`), `quantity_grams`, `logged_at` | One row per logged meal; `getSummary` joins this to `nutrition_info` by `item_name` — **must** stay normalized on write or the join silently drops rows |
+| `nutrition_log` | `user_id` → `users`, `item_name` (normalized, matches `nutrition_info.item_name`), `quantity_grams`, `logged_at`, `recipe_id` → `recipes` (nullable, added by `003_recipes.sql`) | One row per logged meal; `getSummary` joins this to `nutrition_info` by `item_name` — **must** stay normalized on write or the join silently drops rows. `NutritionService.logRecipe` writes one row per recipe ingredient (not one aggregated row), all sharing the same `recipe_id`, with `user_id` left `null` (see the note on `logRecipe` in `NutritionService.java` — it currently has no `userId` param, so these rows won't show up in `getSummary`, which filters by `user_id`, only in `getDailyBreakdown`, which doesn't) |
 | `user_preference` | `id`, `daily_calorie_target`, `daily_protein_target`, `daily_fiber_target` (all `DOUBLE PRECISION`), `weekly_budget` (`NUMERIC`) | Single-row table in practice — `UserPreferenceService` always upserts `id=1`. Seeded with one default row by `004_user_preference.sql` |
 
 ## Things to know before changing the schema
@@ -55,3 +58,8 @@ with mocked repositories won't).
   `java-backend/target/maven-status/` are still tracked in git from before the ignore rule was
   added — expect noisy, meaningless diffs there if you build on a different machine/OS; don't
   commit them.
+- `recipe_ingredients.quantity` is treated as grams everywhere (`RecipeDataLoader`,
+  `RecipeRankingService`, `NutritionService.logRecipe`) — there is no unit-conversion logic
+  anywhere in this app (cups/tbsp/etc. aren't converted to grams). `unit` is a display-only label;
+  if a recipe's CSV row has a non-gram `quantity`, nutrition math for that ingredient will be wrong.
+  Decided deliberately for simplicity — see `recipe/loader/RecipeDataLoader.java`.
