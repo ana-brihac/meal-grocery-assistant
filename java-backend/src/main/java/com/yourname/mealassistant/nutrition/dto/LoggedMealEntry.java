@@ -1,8 +1,7 @@
 package com.yourname.mealassistant.nutrition.dto;
 
-// TODO: once recipe-logging exists (Phase 4+), add an optional recipeId/recipeName field here so
-// recipe-based entries can be distinguished from manually logged ones. Not added yet — NutritionLog
-// itself has no recipe link this phase, so every entry here is inherently manual.
-public record LoggedMealEntry(String itemName, Double quantityGrams, Double calories, Double protein, Double fiber) {
+// recipeId/recipeName are null for manually logged entries (NutritionService.logMeal) and set for
+// recipe-sourced entries (NutritionService.logRecipe), so the calendar view can tell them apart.
+public record LoggedMealEntry(String itemName, Double quantityGrams, Double calories, Double protein, Double fiber,
+                               Long recipeId, String recipeName) {
 }
-

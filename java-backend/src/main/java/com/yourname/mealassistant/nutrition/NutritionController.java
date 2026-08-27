@@ -3,6 +3,7 @@ package com.yourname.mealassistant.nutrition;
 import com.yourname.mealassistant.common.dto.ApiResponse;
 import com.yourname.mealassistant.nutrition.dto.DailyNutritionSummary;
 import com.yourname.mealassistant.nutrition.dto.LogMealRequest;
+import com.yourname.mealassistant.nutrition.dto.LogRecipeRequest;
 import com.yourname.mealassistant.nutrition.dto.NutritionSummaryResponse;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -34,6 +35,12 @@ public class NutritionController {
     @PostMapping("/log")
     public ResponseEntity<Void> logMeal(@RequestBody LogMealRequest request) {
         service.logMeal(request.getUserId(), request.getItemName(), request.getQuantityGrams());
+        return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
+
+    @PostMapping("/log-recipe")
+    public ResponseEntity<Void> logRecipe(@RequestBody LogRecipeRequest request) {
+        service.logRecipe(request.getRecipeId(), request.getServings());
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 

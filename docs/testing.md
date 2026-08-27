@@ -11,10 +11,16 @@ All tests are JUnit 5 + Mockito, no Spring context loaded (fast, no Postgres nee
 
 **What's actually covered:**
 
-- `NutritionServiceTest` (5 tests) — cache hit/miss on `getOrFetchNutritionInfo`, `logMeal` saves a
-  log row, `getSummary` totals (including the zero-logs case and a real multiplier calculation).
+- `NutritionServiceTest` (8 tests) — cache hit/miss on `getOrFetchNutritionInfo`, `logMeal` saves a
+  log row, `logRecipe` saves one log row per ingredient scaled by servings and tagged with
+  `recipeId` (plus the unknown-recipe-id error case), `getDailyBreakdown` populating
+  `recipeId`/`recipeName` on a recipe-sourced entry, `getSummary` totals (including the zero-logs
+  case and a real multiplier calculation).
 - `SpendingServiceTest` (3 tests) — zero receipts, summing multiple receipts, skipping a receipt
   with a null `totalAmount`.
+- `RecipeServiceTest` (3 tests) — ingredients get lower-cased before querying, no-match returns an
+  empty result (not null), result order follows whatever `RecipeRankingService` returns.
+- `RecipeRankingServiceTest` (2 tests) — fewest-ingredients-first ordering, empty candidates list.
 
 **What's not covered — these test files exist but are empty stubs, not placeholders with `@Disabled`
 or a TODO, just genuinely empty:**
@@ -30,9 +36,12 @@ bare-array and `{"items": [...]}` shapes, defaulting missing fields) that would 
 given it's parsing untrusted LLM output.
 
 Also uncovered, and with no empty stub file even flagging it: `UserPreferenceService` (defaults
-fallback, single-row upsert) and `NutritionService.getDailyBreakdown` (per-day grouping, zero-log-day
-backfill) — both added for the preferences/nutrition-calendar feature, both worth real tests given
-the day-boundary and null-macro edge cases involved.
+fallback, single-row upsert) and `NutritionService.getSummary`'s recipe-sourced-entries gap (see
+`docs/database.md`'s note on `logRecipe` leaving `user_id` null) — both worth real tests given the
+day-boundary, null-macro, and null-`user_id` edge cases involved. `RecipeDataLoader` and
+`RecipeRepository.findRecipesMakeableFrom` also have no automated coverage — both need a real
+Postgres instance to test meaningfully (custom `@Query` JPQL, file/classpath reading), which is
+outside this repo's current no-Spring-context unit test setup.
 
 There is no CI configured (no `.github/workflows` or equivalent) — `mvn test` only runs when someone
 runs it locally.
@@ -73,6 +82,41 @@ Postgres). To verify the nutrition/spending stack actually works end-to-end, sta
    docker exec -it <postgres-container> psql -U postgres -d pantrydb -c 'select * from nutrition_info;'
    ```
    to confirm real persistence, not just 200-status theater.
+
+## Recipes (Phase 4)
+
+`RecipeDataLoader` needs `java-backend/src/main/resources/data/recipes.csv` to exist — it isn't
+checked into the repo yet (see `RecipeDataLoader.java` for the expected column format: one row per
+ingredient, `recipe_name,instructions,source,ingredient_name,quantity,unit`, `quantity` in grams).
+Without that file, the app boots fine and `/api/recipes/search` just returns an empty list.
+
+Once the CSV is in place and the app has been started against a real Postgres (so
+`RecipeDataLoader` has actually run):
+
+1. **Search for recipes you can fully make**:
+   ```
+   curl "http://localhost:8080/api/recipes/search?ingredients=pasta&ingredients=olive+oil&ingredients=garlic&ingredients=tomatoes"
+   ```
+   Expect only recipes whose *entire* ingredient list is covered by the given list — a recipe
+   needing one ingredient not listed here should NOT appear, even if the rest match (decided match
+   rule, see `RecipeRepository.findRecipesMakeableFrom`).
+
+2. **Log a recipe**:
+   ```
+   curl -X POST http://localhost:8080/api/nutrition/log-recipe \
+     -H "Content-Type: application/json" \
+     -d '{"recipeId":1,"servings":2.0}'
+   ```
+   Expect `201`. One `nutrition_log` row per `recipe_ingredients` row for that recipe, each with
+   `quantity_grams` = that ingredient's `quantity` × servings, all sharing the same `recipe_id`,
+   and `user_id` left `null` (see `docs/database.md`).
+
+3. **Check the calendar view picks up the recipe link**:
+   ```
+   curl "http://localhost:8080/api/nutrition/calendar?start=2026-08-01&end=2026-08-31"
+   ```
+   Entries from step 2 should have `recipeId`/`recipeName` populated on that day; manually-logged
+   entries (via `/api/nutrition/log`) should have both `null`.
 
 ## A note on the USDA DEMO_KEY
 

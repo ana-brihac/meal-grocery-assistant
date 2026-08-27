@@ -40,8 +40,11 @@ tracks spending against their receipts.
 | `receipt` | `Receipt` entity, upload endpoint, async OCR→parse→save pipeline |
 | `receipt.parser` | `ReceiptParser` — turns Gemini's JSON text into `InventoryItem` rows |
 | `inventory` | `InventoryItem` entity, list/add endpoints, ml-service ping passthrough |
-| `nutrition` | Food logging, USDA-backed nutrition lookup + cache, date-range summary, per-day calendar breakdown |
+| `nutrition` | Food logging (including recipe-based logging), USDA-backed nutrition lookup + cache, date-range summary, per-day calendar breakdown |
 | `spending` | Date-range spend summary over `receipts` |
+| `recipe` | `Recipe`/`RecipeIngredient` entities, `GET /api/recipes/search` (ingredient-coverage matching + ranking) |
+| `recipe.ranking` | `RecipeRankingService` — orders search results (currently: fewest ingredients first) |
+| `recipe.loader` | `RecipeDataLoader` — loads `recipes.csv` into `recipes`/`recipe_ingredients` on startup |
 | `dashboard` | Combines nutrition + spending summaries into one response |
 | `preference` | `UserPreference` entity (daily calorie/protein/fiber targets, weekly budget), single-row read/upsert |
 | `common.client` | External HTTP clients: `OcrClient` (Gemini), `NutritionApiClient` (USDA), `MlServiceClient` |
@@ -87,13 +90,40 @@ hardcoded defaults (2000 cal / 100g protein / 30g fiber / 100 budget) if the row
 which matters because `db/init/004_user_preference.sql` seeds that same row at schema-init time —
 the code fallback only kicks in if that seed is ever skipped or the row is deleted.
 
+**Recipe search → ranking** (Phase 4):
+`GET /api/recipes/search?ingredients=...` lower-cases the given ingredient names and calls
+`RecipeRepository.findRecipesMakeableFrom` — a custom `@Query` that returns only recipes where
+*every* ingredient is covered by the given list (not "any overlap"), and excludes recipes with zero
+ingredient rows. Candidates then go through `RecipeRankingService`, which currently just sorts by
+fewest total ingredients (a `RecipeIngredientRepository.countByRecipeId` call per candidate — no
+caching, so this is one query per candidate per search). No `userId`, no ranking metadata exposed
+in the response — see `docs/backend-api.md`.
+
+**Recipe data loading**:
+`RecipeDataLoader` runs as a `CommandLineRunner` on every app startup. It's a no-op if
+`recipes` already has rows (idempotency guard) or if
+`src/main/resources/data/recipes.csv` doesn't exist — the app boots fine either way. When present,
+it parses the CSV with Apache Commons CSV, groups consecutive rows by `recipe_name` into a `Recipe`
++ its `RecipeIngredient`s, and `saveAll`s both in batches of 200. See `RecipeDataLoader.java` for
+the exact expected column format.
+
+**Recipe-based nutrition logging**:
+`NutritionService.logRecipe(recipeId, servings)` doesn't write one aggregated log row — it writes
+one `NutritionLog` row *per ingredient* in the recipe (same `getOrFetchNutritionInfo` cache-or-fetch
+path `logMeal` uses), each scaled by `ingredient.quantity * servings` and tagged with the same
+`recipeId`. This reuses `getSummary`/`getDailyBreakdown`'s existing per-item multiplier logic
+unchanged. It has no `userId` parameter, so those rows carry `user_id = null` — they show up in
+`getDailyBreakdown` (unfiltered) but not `getSummary` (filtered by `userId`). Exposed via
+`POST /api/nutrition/log-recipe`.
+
 ## Conventions worth knowing
 
 - `ApiResponse<T>` (`{success, data, error}`) is used by `ReceiptController`, `InventoryController`,
-  `UserPreferenceController`, and `NutritionController`'s `/calendar` endpoint, but **not** by
-  `NutritionController`'s `/summary`/`/log`, `SpendingController`, or `DashboardController`, which
-  return raw DTOs or `ResponseEntity<Void>`. There's still no single consistent response envelope
-  across the API — check the specific endpoint you're calling, not just the controller.
+  `UserPreferenceController`, `RecipeController`, and `NutritionController`'s `/calendar` endpoint,
+  but **not** by `NutritionController`'s `/summary`/`/log`, `SpendingController`, or
+  `DashboardController`, which return raw DTOs or `ResponseEntity<Void>`. There's still no single
+  consistent response envelope across the API — check the specific endpoint you're calling, not
+  just the controller.
 - Services are plain constructor-injected `@Service`/`@Component` beans, no interfaces, no
   builders — straightforward to read and extend.
 - `UserPreference` enforces its single-row assumption only in `UserPreferenceService` logic

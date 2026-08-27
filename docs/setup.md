@@ -33,16 +33,21 @@ docker-compose up -d postgres
 
 This runs Postgres 16 on `localhost:5432` (db `pantrydb`, user/pass `postgres`/`postgres`) and, **on
 first container start only**, applies `db/init/001_init_schema.sql`, `002_nutrition_spending.sql`,
-and `004_user_preference.sql` (the last of these also seeds one default preferences row, `id=1`).
+`003_recipes.sql`, and `004_user_preference.sql` (the last of these also seeds one default
+preferences row, `id=1`).
 
 **Caveat:** if you're reusing an existing `pantry_pg_data` Docker volume from before one of these
-tables existed, its init script will *not* rerun automatically — Postgres only runs
-`docker-entrypoint-initdb.d` scripts against a fresh data directory. If you see the backend fail to
-start with a Hibernate schema-validation error, or `nutrition_info`/`nutrition_log`/
-`user_preference` missing, apply the relevant migration by hand, e.g.:
+tables/columns existed, its init script will *not* rerun automatically — Postgres only runs
+`docker-entrypoint-initdb.d` scripts against a fresh data directory. This is very likely to bite you
+specifically for `003_recipes.sql` if your volume predates Phase 4 (i.e. you had Postgres running
+for nutrition/spending/preferences before recipes existed) — the backend will fail to start with a
+Hibernate schema-validation error mentioning `recipes.source`, `recipe_ingredients`, or
+`nutrition_log.recipe_id` as missing. If you see that, or `nutrition_info`/`nutrition_log`/
+`user_preference` missing instead, apply the relevant migration by hand, e.g.:
 
 ```
 docker exec -i <postgres-container> psql -U postgres -d pantrydb < db/init/002_nutrition_spending.sql
+docker exec -i <postgres-container> psql -U postgres -d pantrydb < db/init/003_recipes.sql
 docker exec -i <postgres-container> psql -U postgres -d pantrydb < db/init/004_user_preference.sql
 ```
 
