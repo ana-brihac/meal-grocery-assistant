@@ -42,5 +42,11 @@ receipttest.png
 *.jpg
 *.jpeg
 
+# Python / ml-service
+__pycache__/
+*.pyc
+ml-service/.venv/
+.pytest_cache/
+
 # Environment secrets - never commit
 .env

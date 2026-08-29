@@ -1,6 +1,5 @@
 package com.yourname.mealassistant.inventory;
 
-import com.yourname.mealassistant.common.client.MlServiceClient;
 import org.springframework.stereotype.Service;
 import java.util.List;
 import java.math.BigDecimal;
@@ -9,11 +8,9 @@ import java.math.BigDecimal;
 public class InventoryService {
 
     private final InventoryRepository repository;
-    private final MlServiceClient mlServiceClient;
 
-    public InventoryService(InventoryRepository repository, MlServiceClient mlServiceClient) {
+    public InventoryService(InventoryRepository repository) {
         this.repository = repository;
-        this.mlServiceClient = mlServiceClient;
     }
 
     public List<InventoryItem> getAllItems() {
@@ -27,9 +24,5 @@ public class InventoryService {
         newItem.setQuantity(quantity);
 
         return repository.save(newItem);
-    }
-
-    public String pingDummyEndpoint() {
-        return mlServiceClient.pingDummyEndpoint();
     }
 }

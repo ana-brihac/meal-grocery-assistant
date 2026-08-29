@@ -29,8 +29,20 @@ public class RecipeService {
         // No userId (decided — see RecipeController), and the decided scoring rule (fewest
         // ingredients needed) doesn't use inventory, so this passes an empty list rather than
         // resolving a per-user inventory.
-        List<Recipe> ranked = recipeRankingService.rankRecipes(candidates, Collections.emptyList());
+        List<Recipe> ranked = "mealHistory".equals(request.rankBy())
+                ? rankByMealHistoryWithFallback(candidates)
+                : recipeRankingService.rankRecipes(candidates, Collections.emptyList());
 
         return new RecipeSearchResponse(ranked);
+    }
+
+    // A search request shouldn't fail just because the ML ranking signal is unavailable — falls
+    // back to the same default (fewest-ingredients) ranking used when rankBy isn't set at all.
+    private List<Recipe> rankByMealHistoryWithFallback(List<Recipe> candidates) {
+        try {
+            return recipeRankingService.rankByMealHistorySimilarity(candidates);
+        } catch (RuntimeException e) {
+            return recipeRankingService.rankRecipes(candidates, Collections.emptyList());
+        }
     }
 }
