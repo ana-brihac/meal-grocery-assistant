@@ -32,12 +32,25 @@ passing while the real thing is broken) can easily recur:
   managed executor — so this config class does nothing. Either implement it (a dedicated executor
   bean, sized appropriately, wired via `@Async`) or delete it so it doesn't look like unfinished
   wiring.
-- **ml-service isn't actually runnable via Docker.** Both `ml-service/Dockerfile` and
-  `ml-service/requirements.txt` are empty files. See `docs/ml-service.md`.
-- **Zero test coverage for three classes.** `InventoryServiceTest.java`, `MlServiceClientTest.java`,
-  and `ReceiptParserTest.java` all exist as files but are completely empty — not stubs with a TODO,
-  just empty. `mvn test` passes cleanly with no signal about any of these areas. `ReceiptParser` in
-  particular is parsing untrusted LLM output and would benefit most from real tests.
+- **ml-service isn't containerized.** `ml-service/requirements.txt` is now filled in and pinned
+  (Phase 5), but `ml-service/Dockerfile` is still an empty file and `docker-compose.yml` has no
+  `ml-service` entry — only Postgres comes up via compose. Run `ml-service` by hand with `uvicorn`.
+  See `docs/ml-service.md`.
+- **ml-service has no FastAPI-level tests and no CI.** `tests/test_recommendation_service.py` tests
+  the service functions directly (3 tests); there's no `TestClient` test of `POST /recommendations`
+  itself, and nothing runs `pytest` automatically. The Java `MlServiceClientTest` covers the HTTP
+  contract from the caller's side.
+- **First ml-service startup needs network.** `sentence-transformers` downloads `all-MiniLM-L6-v2`
+  (~80 MB) from Hugging Face on first use and caches it under `~/.cache/huggingface`. A fully
+  offline first run of `pytest` or the first `/recommendations` call will fail.
+- **Meal-history ranking ignores recency.** `embed_meal_history` mean-pools every `nutrition_log`
+  entry's name embedding with equal weight; `logged_at` is sent and parsed but unused. Also, like
+  the rest of the recipe/nutrition endpoints, it's unscoped by `userId` (`findAll()`).
+- **Zero test coverage for two classes.** `InventoryServiceTest.java` and `ReceiptParserTest.java`
+  exist as files but are completely empty — not stubs with a TODO, just empty. `mvn test` passes
+  cleanly with no signal about either area. `ReceiptParser` in particular is parsing untrusted LLM
+  output and would benefit most from real tests. (`MlServiceClientTest.java` was in this list until
+  Phase 5 — it now has real tests.)
 - **No CI.** No `.github/workflows` or equivalent — tests only run when someone remembers to run
   them locally.
 - **Receipt upload has no failure feedback.** `POST /api/receipts/upload` returns success
