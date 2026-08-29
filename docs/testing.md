@@ -18,22 +18,30 @@ All tests are JUnit 5 + Mockito, no Spring context loaded (fast, no Postgres nee
   case and a real multiplier calculation).
 - `SpendingServiceTest` (3 tests) — zero receipts, summing multiple receipts, skipping a receipt
   with a null `totalAmount`.
-- `RecipeServiceTest` (3 tests) — ingredients get lower-cased before querying, no-match returns an
-  empty result (not null), result order follows whatever `RecipeRankingService` returns.
+- `RecipeServiceTest` (5 tests) — ingredients get lower-cased before querying, no-match returns an
+  empty result (not null), result order follows whatever `RecipeRankingService` returns, and (Phase
+  5) `rankBy=mealHistory` routes to `rankByMealHistorySimilarity`, with a fallback to the default
+  ingredient ranking when that throws.
 - `RecipeRankingServiceTest` (2 tests) — fewest-ingredients-first ordering, empty candidates list.
+  (Does **not** cover `rankByMealHistorySimilarity` — that path is exercised via `RecipeServiceTest`
+  and `MlServiceClientTest`.)
+- `MlServiceClientTest` (2 tests, Phase 5) — spins up a real `com.sun.net.httpserver.HttpServer` on
+  a random port (no wiremock/mockwebserver dependency): one test asserts a real
+  `POST /recommendations` round-trip serializes the request and parses `{"results":[...]}`; the
+  other asserts the configured 5-second timeout actually fires when the server hangs (so this class
+  takes ~5s to run).
 
 **What's not covered — these test files exist but are empty stubs, not placeholders with `@Disabled`
 or a TODO, just genuinely empty:**
 
 - `InventoryServiceTest.java`
-- `MlServiceClientTest.java`
 - `ReceiptParserTest.java`
 
-If you're picking up work in inventory, the ml-service client, or receipt parsing, there is
-currently **zero** automated coverage — don't assume a green `mvn test` says anything about those
-areas. `ReceiptParser` in particular has non-trivial logic (markdown-fence stripping, handling both
-bare-array and `{"items": [...]}` shapes, defaulting missing fields) that would benefit from tests
-given it's parsing untrusted LLM output.
+If you're picking up work in inventory or receipt parsing, there is currently **zero** automated
+coverage — don't assume a green `mvn test` says anything about those areas. `ReceiptParser` in
+particular has non-trivial logic (markdown-fence stripping, handling both bare-array and
+`{"items": [...]}` shapes, defaulting missing fields) that would benefit from tests given it's
+parsing untrusted LLM output.
 
 Also uncovered, and with no empty stub file even flagging it: `UserPreferenceService` (defaults
 fallback, single-row upsert) and `NutritionService.getSummary`'s recipe-sourced-entries gap (see
@@ -45,6 +53,26 @@ outside this repo's current no-Spring-context unit test setup.
 
 There is no CI configured (no `.github/workflows` or equivalent) — `mvn test` only runs when someone
 runs it locally.
+
+## ml-service unit tests (Phase 5)
+
+```
+cd ml-service
+python -m venv .venv && source .venv/bin/activate   # if not already set up
+pip install -r requirements.txt
+pytest -q
+```
+
+`tests/test_recommendation_service.py` — 3 real tests: embedding output shape is consistent across
+recipes of different length (this one loads the real `all-MiniLM-L6-v2` model), `recommend()` ranks
+a candidate pointing the same direction as the history vector above one pointing the opposite way
+(asserts both order and the cosine values), and an empty candidate list returns `[]`.
+
+First run is **slow** — cold `torch`/`transformers` import plus a one-time ~80 MB model download
+from Hugging Face (needs network). After that it's a few seconds. A passing run here is real signal;
+before Phase 5's dependencies were installed the file couldn't even be collected.
+
+There are no FastAPI-level (`TestClient`) tests and no CI for `ml-service` either.
 
 ## Integration / manual verification
 
@@ -117,6 +145,25 @@ Once the CSV is in place and the app has been started against a real Postgres (s
    ```
    Entries from step 2 should have `recipeId`/`recipeName` populated on that day; manually-logged
    entries (via `/api/nutrition/log`) should have both `null`.
+
+## Recipe recommendations (Phase 5)
+
+Needs `ml-service` running (`cd ml-service && uvicorn app.main:app --port 8000`) in addition to the
+backend, plus some `nutrition_log` history to rank against (log a few meals first).
+
+1. **Default ranking is unchanged** — `GET /api/recipes/search?ingredients=...` with no `rankBy`
+   still returns fewest-ingredients-first. Confirm Phase 4 behaviour didn't move.
+
+2. **`rankBy=mealHistory` re-orders by taste** — add `&rankBy=mealHistory`. Recipes closer to what's
+   in `nutrition_log` should rise to the top. The response shape is identical (no score field is
+   exposed) — only the order changes.
+
+3. **Fallback when `ml-service` is down** — stop `uvicorn`, repeat the `rankBy=mealHistory` request.
+   It should still return `200` with results in the default fewest-ingredients order (within ~5s —
+   the `MlServiceClient` timeout), **not** a 502 or a hang.
+
+4. **Hit `ml-service` directly** — see `docs/ml-service.md` for a `POST /recommendations` curl and
+   the expected ranked-list response.
 
 ## A note on the USDA DEMO_KEY
 

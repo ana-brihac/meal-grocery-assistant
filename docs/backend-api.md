@@ -10,7 +10,6 @@ package layout and `docs/database.md` for persistence.
 | `/api/receipts/upload` | POST | multipart `file` | `ApiResponse<String>` — immediately, before OCR finishes (see below) |
 | `/api/inventory` | GET | — | `ApiResponse<List<InventoryItem>>` |
 | `/api/inventory` | POST | `{name, quantity}` (`ItemRequest`) | `201`, `ApiResponse<InventoryItem>` |
-| `/api/inventory/ping-python` | GET | — | `ApiResponse<String>` — proxies `ml-service`'s `/ping` |
 | `/api/nutrition/log` | POST | `{userId, itemName, quantityGrams}` (`LogMealRequest`) | `201`, empty body |
 | `/api/nutrition/log-recipe` | POST | `{recipeId, servings}` (`LogRecipeRequest`) | `201`, empty body — writes one `nutrition_log` row per recipe ingredient, no `userId` (see `NutritionService.logRecipe`) |
 | `/api/nutrition/summary` | GET | `userId`, `from`, `to` (ISO-8601 datetimes, e.g. `2026-08-01T00:00:00`) | `NutritionSummaryResponse` (raw, not wrapped) |
@@ -19,7 +18,7 @@ package layout and `docs/database.md` for persistence.
 | `/api/dashboard/summary` | GET | `userId`, `from`, `to` (ISO-8601 dates) | `{nutrition: NutritionSummaryResponse, spending: SpendingSummaryResponse}` |
 | `/api/preferences` | GET | — | `ApiResponse<UserPreference>` — falls back to defaults (2000 cal / 100g protein / 30g fiber / 100 budget) if no row exists yet |
 | `/api/preferences` | PUT | `UserPreference` body | `ApiResponse<UserPreference>` — upserts the single row (always `id=1`, see `docs/database.md`) |
-| `/api/recipes/search` | GET | `ingredients` (repeated, e.g. `?ingredients=egg&ingredients=milk`) — no `userId` (decided, see below) | `ApiResponse<RecipeSearchResponse>` — only recipes whose *entire* ingredient list is covered by `ingredients` (not "any overlap"), ordered fewest-ingredients-first |
+| `/api/recipes/search` | GET | `ingredients` (repeated, e.g. `?ingredients=egg&ingredients=milk`) — no `userId` (decided, see below); optional `rankBy=mealHistory` | `ApiResponse<RecipeSearchResponse>` — only recipes whose *entire* ingredient list is covered by `ingredients` (not "any overlap"). Ordered fewest-ingredients-first by default; `rankBy=mealHistory` re-ranks by meal-history embedding similarity via `ml-service` (see below) |
 
 Note the inconsistency: receipts/inventory/preferences responses are wrapped in
 `ApiResponse<T> {success, data, error}`; nutrition/spending/dashboard return raw DTOs directly.
@@ -37,6 +36,17 @@ multi-user support ever happens.
 single-tenant in practice today, so `RecipeService` doesn't scope by user. `/api/nutrition/log-recipe`
 has the same gap for the same reason — no `userId` in the request, so those `nutrition_log` rows
 are saved with `user_id = null` (see `docs/database.md`).
+
+### `rankBy=mealHistory` (Phase 5)
+
+With `rankBy=mealHistory`, `RecipeService` delegates ordering to
+`RecipeRankingService.rankByMealHistorySimilarity`, which POSTs the candidate recipes plus **all**
+`nutrition_log` rows (no `userId`) to `ml-service` `POST /recommendations`. `ml-service` embeds both
+with sentence-transformers and returns the candidates scored by cosine similarity; results come back
+ordered by that score. If `ml-service` is unreachable, errors, or doesn't answer within
+`MlServiceClient`'s 5-second timeout, the search **falls back to the default fewest-ingredients
+ordering** — it does not 502 or hang. Any other `rankBy` value is treated as "not set". The score
+itself is not exposed in the response — only the order changes. See `docs/ml-service.md`.
 
 ## Error handling
 
@@ -78,8 +88,11 @@ for the USDA client details (pageSize, buffer limits, rate limits, match-quality
 - `NutritionApiClient` — Spring `WebClient` (reactive), calls USDA `/foods/search`.
 - `OcrClient` — plain `RestTemplate`, calls Gemini's `generateContent` endpoint, parses the
   response with `json-simple` (not Jackson — different JSON library than `ReceiptParser` uses).
-- `MlServiceClient` — Spring `RestClient`, calls the local `ml-service` `/ping` endpoint.
+- `MlServiceClient` — Spring `WebClient` (reactive), `POST`s to the local `ml-service`
+  `/recommendations` endpoint with a 5-second `.timeout(...)`; `.block()`s for the result.
+  DTOs in `common/client/dto/` mirror `ml-service`'s Pydantic schemas. Changed from a
+  `RestClient` + `/ping` in Phase 5.
 
-Three different HTTP client styles (`WebClient`, `RestTemplate`, `RestClient`) and two different
-JSON libraries (`json-simple`, Jackson) are in use across these three classes — there's no shared
-convention to follow if you add a fourth.
+Still two different HTTP client styles (`WebClient`, `RestTemplate`) and two different JSON
+libraries (`json-simple`, Jackson) across these classes — there's no shared convention to follow if
+you add a fourth.

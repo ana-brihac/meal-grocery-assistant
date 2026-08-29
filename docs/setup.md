@@ -63,19 +63,24 @@ mvn spring-boot:run
 - `ddl-auto: validate` — the app will refuse to start if the live schema doesn't exactly match the
   JPA entities (column types included). See `docs/database.md`.
 
-## 4. ml-service (optional, not required for the backend's core features)
+## 4. ml-service (optional — only needed for `GET /api/recipes/search?rankBy=mealHistory`)
 
-`ml-service/` is a bare FastAPI scaffold — see `docs/ml-service.md`. Its `Dockerfile` and
-`requirements.txt` are currently empty, so it isn't runnable via Docker yet. To run it manually:
+`ml-service/` is a FastAPI app hosting the Phase 5 recommendation endpoint — see `docs/ml-service.md`.
+`requirements.txt` is filled in and pinned, but the `Dockerfile` is still empty and there's no
+`docker-compose` service for it, so run it manually:
 
 ```
 cd ml-service
-pip install fastapi uvicorn
-uvicorn app.main:app --reload --port 8000
+python -m venv .venv && source .venv/bin/activate     # .venv/Scripts/activate on Windows
+pip install -r requirements.txt                        # large — pulls torch via sentence-transformers
+uvicorn app.main:app --port 8000
 ```
 
-The backend expects it at `http://localhost:8000` (`ml-service.base-url` in `application.yml`) and
-only uses it for one passthrough endpoint, `GET /api/inventory/ping-python`.
+The backend expects it at `http://localhost:8000` (`ml-service.base-url` in `application.yml`). It's
+called only by `RecipeRankingService.rankByMealHistorySimilarity` when a recipe search passes
+`rankBy=mealHistory`; every other endpoint works without it, and even that search falls back to the
+default ranking if `ml-service` is down. The first request triggers a one-time ~80 MB model
+download from Hugging Face.
 
 ## Verifying the stack is up
 

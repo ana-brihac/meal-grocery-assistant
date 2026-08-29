@@ -6,16 +6,18 @@ inventory items, then track nutrition and spending against it.
 ## Stack
 
 - **java-backend** — Spring Boot 3.3.4 (Java 21) REST API. Owns receipts, inventory, nutrition,
-  spending, and recipes. Talks to the USDA FoodData Central API for nutrition lookups and to Gemini
-  for receipt OCR.
-- **ml-service** — Python service used by the backend for auxiliary ML tasks.
+  spending, and recipes. Talks to the USDA FoodData Central API for nutrition lookups, to Gemini
+  for receipt OCR, and to `ml-service` for recipe recommendations.
+- **ml-service** — Python / FastAPI. Hosts `POST /recommendations` (Phase 5): ranks candidate
+  recipes by sentence-transformers embedding similarity to the user's logged meal history. Run
+  directly with `uvicorn` — not containerized yet. See `docs/ml-service.md`.
 - **Postgres 16** — primary datastore, schema-managed via the SQL scripts in `db/init`.
 
 ## Project layout
 
 ```
 java-backend/   Spring Boot API (see src/main/java/com/yourname/mealassistant)
-ml-service/     Python ML service
+ml-service/     Python / FastAPI — recipe recommendation endpoint (Phase 5)
 db/init/        Postgres schema, applied on first container start
 docs/           Architecture and setup notes
 ```
@@ -71,7 +73,7 @@ docs/           Architecture and setup notes
 | `/api/spending/summary` | GET (`userId`, `from`, `to` as ISO dates) | Total receipt spend over a date range |
 | `/api/dashboard/summary` | GET (`userId`, `from`, `to` as ISO dates) | Combined nutrition + spending summary |
 | `/api/preferences` | GET / PUT | Read / update daily calorie-protein-fiber targets and weekly budget (single-user, one row) |
-| `/api/recipes/search` | GET (`ingredients`, repeated) | Recipes fully makeable from the given ingredients — every ingredient the recipe needs must be in the list, not just "any overlap" |
+| `/api/recipes/search` | GET (`ingredients`, repeated; optional `rankBy=mealHistory`) | Recipes fully makeable from the given ingredients — every ingredient the recipe needs must be in the list, not just "any overlap". `rankBy=mealHistory` re-ranks by meal-history similarity via `ml-service`, falling back to the default order if it's unavailable |
 | `/api/nutrition/log-recipe` | POST | Log a recipe eaten (`recipeId`, `servings`) — writes one nutrition log row per ingredient, scaled by servings |
 
 Recipes are loaded from a CSV (`java-backend/src/main/resources/data/recipes.csv`) by
@@ -89,6 +91,14 @@ Unit tests (mocked repositories/API client, no external services needed):
 ```
 cd java-backend
 mvn test
+```
+
+`ml-service` tests (needs its venv + `pip install -r requirements.txt`; first run downloads the
+embedding model):
+
+```
+cd ml-service
+pytest -q
 ```
 
 Manual/integration check against a real stack:
