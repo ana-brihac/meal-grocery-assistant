@@ -26,9 +26,5 @@ public class InventoryController {
                 .status(HttpStatus.CREATED)
                 .body(ApiResponse.ok(service.addItem(request.getName(), request.getQuantity())));
     }
-    @GetMapping("/ping-python")
-    public ResponseEntity<ApiResponse<String>> callMl() {
-        return ResponseEntity.ok(ApiResponse.ok(service.pingDummyEndpoint()));
-    }
 
 }

@@ -60,4 +60,32 @@ class RecipeServiceTest {
 
         assertThat(result.results()).containsExactly(b, a);
     }
+
+    @Test
+    void searchRecipes_rankByMealHistory_usesSimilarityRanking() {
+        Recipe pasta = new Recipe();
+        pasta.setName("Tomato Pasta");
+
+        when(recipeRepository.findRecipesMakeableFrom(List.of("tomato"))).thenReturn(List.of(pasta));
+        when(recipeRankingService.rankByMealHistorySimilarity(List.of(pasta))).thenReturn(List.of(pasta));
+
+        RecipeSearchResponse result = service.searchRecipes(new RecipeSearchRequest(List.of("tomato"), "mealHistory"));
+
+        assertThat(result.results()).containsExactly(pasta);
+    }
+
+    @Test
+    void searchRecipes_rankByMealHistory_fallsBackToIngredientRankingOnFailure() {
+        Recipe pasta = new Recipe();
+        pasta.setName("Tomato Pasta");
+
+        when(recipeRepository.findRecipesMakeableFrom(List.of("tomato"))).thenReturn(List.of(pasta));
+        when(recipeRankingService.rankByMealHistorySimilarity(List.of(pasta)))
+                .thenThrow(new RuntimeException("ml-service unreachable"));
+        when(recipeRankingService.rankRecipes(List.of(pasta), List.of())).thenReturn(List.of(pasta));
+
+        RecipeSearchResponse result = service.searchRecipes(new RecipeSearchRequest(List.of("tomato"), "mealHistory"));
+
+        assertThat(result.results()).containsExactly(pasta);
+    }
 }
