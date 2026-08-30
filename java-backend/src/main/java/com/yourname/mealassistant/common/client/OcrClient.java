@@ -19,6 +19,9 @@ import java.io.IOException;
 @Component
 public class OcrClient {
 
+    private static final String RECEIPT_PROMPT =
+        "Extract the items, quantities, and prices from this receipt into a structured JSON format.";
+
     @Value("${ocr.api-key}")
     private String apiKey;
 
@@ -26,8 +29,14 @@ public class OcrClient {
     private String apiUrl;
 
     public String extractTextFromImage(byte[] fileBytes, String contentType) throws IOException {
+        return extractTextFromImage(fileBytes, contentType, RECEIPT_PROMPT);
+    }
+
+    // Same call, caller-supplied prompt — used by IngredientPriceService for shelf price tags
+    //, which need a different instruction than the receipt one.
+    public String extractTextFromImage(byte[] fileBytes, String contentType, String prompt) throws IOException {
         String base64Image = Base64.getEncoder().encodeToString(fileBytes);
-        
+
         if (contentType == null || contentType.isEmpty()) {
             contentType = "image/jpeg"; // Default fallback
         }
@@ -36,7 +45,7 @@ public class OcrClient {
             "contents", List.of(
                 Map.of(
                     "parts", List.of(
-                        Map.of("text", "Extract the items, quantities, and prices from this receipt into a structured JSON format."),
+                        Map.of("text", prompt),
                         Map.of("inline_data", Map.of(
                             "mime_type", contentType,
                             "data", base64Image
@@ -63,7 +72,7 @@ public class OcrClient {
         JSONObject rootObject = (JSONObject) obj;
 
         JSONArray candidates = (JSONArray) rootObject.get("candidates");
-        
+
         if (candidates == null || candidates.isEmpty()) {
             throw new RuntimeException("No candidates found in OCR response");
         }

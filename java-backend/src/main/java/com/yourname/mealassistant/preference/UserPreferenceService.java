@@ -30,6 +30,10 @@ public class UserPreferenceService {
         existing.setProtein(preferences.getProtein());
         existing.setFiber(preferences.getFiber());
         existing.setWeeklyBudget(preferences.getWeeklyBudget());
+        // Null-safe so a PUT that omits the field doesn't wipe an existing meal-prep setting.
+        if (preferences.getMealPrepBatchSize() != null) {
+            existing.setMealPrepBatchSize(preferences.getMealPrepBatchSize());
+        }
 
         return userPreferenceRepository.save(existing);
     }

@@ -32,7 +32,13 @@ public class RecipeRankingService {
 
     // Decided: rank by fewest total ingredients needed (simpler recipes first) — not surfaced to
     // the app, just determines result order. availableInventory is unused by this rule but stays
-    // a parameter for the Phase 6 hook below and in case a future rule needs it.
+    // a parameter in case a future rule needs it.
+    // Decided: this service stays PURELY structural. Budget/calorie/protein/fiber
+    // constraint enforcement lives entirely in mealplan/optimizer/MealPlanOptimizer, which is the
+    // single constraint engine — RecipeRankingService gets no UserPreference parameter and no
+    // budget/calorie awareness, so there is zero constraint-logic duplication between the two.
+    // (The Phase 4 hook comment that used to sit at the bottom of this file predicted a
+    // UserPreference overload here; that was resolved the other way.)
     public List<Recipe> rankRecipes(List<Recipe> candidates, List<InventoryItem> availableInventory) {
         return candidates.stream()
                 .sorted(Comparator.comparingLong(recipe -> recipeIngredientRepository.countByRecipeId(recipe.getId())))
@@ -75,10 +81,4 @@ public class RecipeRankingService {
 
         return new RecommendationRequest.RecipeCandidate(recipe.getId(), recipe.getName(), ingredients);
     }
-
-    // TODO (Phase 6): UserPreference (see preference/UserPreference.java — daily calorie/protein/
-    // fiber targets, weekly budget) will start factoring into ranking/filtering once budget- and
-    // calorie-aware meal plans land. Not needed yet — this hook is just so it isn't forgotten:
-    // rankRecipes will likely need an additional UserPreference (or relevant subset) parameter, or
-    // a second overload, at that point.
 }

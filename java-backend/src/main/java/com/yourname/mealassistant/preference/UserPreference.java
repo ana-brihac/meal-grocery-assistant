@@ -25,6 +25,12 @@ public class UserPreference {
     @Column(name = "weekly_budget")
     private BigDecimal weeklyBudget;
 
+    // Meal-prep: how many consecutive same-meal-type slots one cooked recipe may cover
+    // in a generated plan. 1 = no batching (a distinct recipe per slot); 2-3 = "cook once, eat
+    // 2-3 times". Applied to every plan; see MealPlanOptimizer.
+    @Column(name = "meal_prep_batch_size")
+    private Integer mealPrepBatchSize = 1;
+
     public UserPreference() {}
 
     public UserPreference(Double dailyCalorieTarget, Double dailyProteinTarget, Double dailyFiberTarget, BigDecimal weeklyBudget) {
@@ -72,5 +78,13 @@ public class UserPreference {
 
     public void setWeeklyBudget(BigDecimal weeklyBudget) {
         this.weeklyBudget = weeklyBudget;
+    }
+
+    public Integer getMealPrepBatchSize() {
+        return this.mealPrepBatchSize;
+    }
+
+    public void setMealPrepBatchSize(Integer mealPrepBatchSize) {
+        this.mealPrepBatchSize = mealPrepBatchSize;
     }
 }

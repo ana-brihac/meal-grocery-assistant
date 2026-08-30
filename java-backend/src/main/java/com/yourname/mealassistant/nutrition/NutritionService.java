@@ -1,10 +1,13 @@
 package com.yourname.mealassistant.nutrition;
 
+import com.yourname.mealassistant.common.client.NutritionAiClient;
 import com.yourname.mealassistant.common.client.NutritionApiClient;
+import com.yourname.mealassistant.common.client.dto.NutritionEstimate;
 import com.yourname.mealassistant.common.util.ItemNameNormalizer;
 import com.yourname.mealassistant.nutrition.dto.DailyNutritionSummary;
 import com.yourname.mealassistant.nutrition.dto.LoggedMealEntry;
 import com.yourname.mealassistant.nutrition.dto.NutritionSummaryResponse;
+import com.yourname.mealassistant.nutrition.dto.RecipeNutrition;
 import com.yourname.mealassistant.recipe.Recipe;
 import com.yourname.mealassistant.recipe.RecipeIngredient;
 import com.yourname.mealassistant.recipe.RecipeIngredientRepository;
@@ -22,17 +25,20 @@ import java.util.Map;
 public class NutritionService {
 
     private final NutritionApiClient nutritionApiClient;
+    private final NutritionAiClient nutritionAiClient;
     private final NutritionInfoRepository nutritionInfoRepository;
     private final NutritionLogRepository nutritionLogRepository;
     private final RecipeRepository recipeRepository;
     private final RecipeIngredientRepository recipeIngredientRepository;
 
     public NutritionService(NutritionApiClient nutritionApiClient,
+                            NutritionAiClient nutritionAiClient,
                             NutritionInfoRepository nutritionInfoRepository,
                             NutritionLogRepository nutritionLogRepository,
                             RecipeRepository recipeRepository,
                             RecipeIngredientRepository recipeIngredientRepository) {
         this.nutritionApiClient = nutritionApiClient;
+        this.nutritionAiClient = nutritionAiClient;
         this.nutritionInfoRepository = nutritionInfoRepository;
         this.nutritionLogRepository = nutritionLogRepository;
         this.recipeRepository = recipeRepository;
@@ -73,8 +79,55 @@ public class NutritionService {
                 }
             }
 
+            // USDA had no usable calorie figure — last-resort AI estimate. Cached like
+            // any other lookup (including as a null-macro row if the AI also can't help), so this
+            // runs at most once per food.
+            if (newInfo.getCalories() == null) {
+                NutritionEstimate estimate = nutritionAiClient.estimateNutrition(normalized);
+                if (estimate != null) {
+                    newInfo.setCalories(estimate.calories());
+                    newInfo.setProtein(estimate.protein());
+                    newInfo.setFibers(estimate.fiber());
+                    newInfo.setFats(estimate.fats());
+                    newInfo.setCarbs(estimate.carbs());
+                }
+            }
+
             return nutritionInfoRepository.save(newInfo);
         });
+    }
+
+    // Read-only serving-scaled nutrition for one recipe, for meal planning. Sums each
+    // ingredient's macros through the same cache-or-fetch path logMeal/logRecipe use (now with an
+    // AI fallback), scaled by ingredient grams * servings. Does NOT write nutrition_log.
+    // `complete` is false if any ingredient still had no calorie data after that whole chain.
+    // Note: on a cold nutrition_info cache the first call for a recipe can be slow (a USDA — and
+    // occasionally an AI — round trip per new ingredient); results are cached so later calls are
+    // cheap.
+    public RecipeNutrition computeRecipeNutrition(Long recipeId, Double servings) {
+        Recipe recipe = recipeRepository.findById(recipeId)
+                .orElseThrow(() -> new IllegalArgumentException("Recipe not found: " + recipeId));
+
+        double totalCalories = 0;
+        double totalProtein = 0;
+        double totalFiber = 0;
+        boolean complete = true;
+
+        for (RecipeIngredient ingredient : recipeIngredientRepository.findByRecipeId(recipe.getId())) {
+            NutritionInfo info = getOrFetchNutritionInfo(ingredient.getIngredientName());
+            double grams = ingredient.getQuantity() * servings;
+            double multiplier = grams / info.getBaseQuantity();
+
+            if (info.getCalories() == null) {
+                complete = false;
+                continue;
+            }
+            totalCalories += info.getCalories() * multiplier;
+            if (info.getProtein() != null) totalProtein += info.getProtein() * multiplier;
+            if (info.getFibers() != null) totalFiber += info.getFibers() * multiplier;
+        }
+
+        return new RecipeNutrition(totalCalories, totalProtein, totalFiber, complete);
     }
 
     public void logMeal(Long userId, String foodName, Double quantityGrams) {

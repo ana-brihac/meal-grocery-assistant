@@ -1,8 +1,11 @@
 package com.yourname.mealassistant.nutrition;
 
+import com.yourname.mealassistant.common.client.NutritionAiClient;
 import com.yourname.mealassistant.common.client.NutritionApiClient;
+import com.yourname.mealassistant.common.client.dto.NutritionEstimate;
 import com.yourname.mealassistant.nutrition.dto.DailyNutritionSummary;
 import com.yourname.mealassistant.nutrition.dto.NutritionSummaryResponse;
+import com.yourname.mealassistant.nutrition.dto.RecipeNutrition;
 import com.yourname.mealassistant.recipe.Recipe;
 import com.yourname.mealassistant.recipe.RecipeIngredient;
 import com.yourname.mealassistant.recipe.RecipeIngredientRepository;
@@ -29,6 +32,7 @@ import static org.mockito.Mockito.*;
 class NutritionServiceTest {
 
     @Mock NutritionApiClient nutritionApiClient;
+    @Mock NutritionAiClient nutritionAiClient;
     @Mock NutritionInfoRepository nutritionInfoRepository;
     @Mock NutritionLogRepository nutritionLogRepository;
     @Mock RecipeRepository recipeRepository;
@@ -77,6 +81,87 @@ class NutritionServiceTest {
         verify(nutritionApiClient, times(1)).searchFoodByName("tuna");
         verify(nutritionInfoRepository, times(1)).save(any(NutritionInfo.class));
         assertThat(result.getItemName()).isEqualTo("tuna");
+    }
+
+    @Test
+    void getOrFetchNutritionInfo_usdaMiss_fallsBackToAiEstimateAndCachesIt() {
+        when(nutritionInfoRepository.findById("dragonfruit")).thenReturn(Optional.empty());
+        when(nutritionApiClient.searchFoodByName("dragonfruit")).thenReturn(null);
+        when(nutritionAiClient.estimateNutrition("dragonfruit"))
+                .thenReturn(new NutritionEstimate(60.0, 1.2, 3.0, 0.4, 13.0));
+        when(nutritionInfoRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        NutritionInfo result = service.getOrFetchNutritionInfo("dragonfruit");
+
+        assertThat(result.getCalories()).isEqualTo(60.0);
+        assertThat(result.getProtein()).isEqualTo(1.2);
+        assertThat(result.getFibers()).isEqualTo(3.0);
+        verify(nutritionInfoRepository, times(1)).save(any(NutritionInfo.class));
+    }
+
+    // ---- computeRecipeNutrition ----
+
+    @Test
+    void computeRecipeNutrition_sumsIngredientMacrosScaledByServings() {
+        Recipe recipe = new Recipe();
+        recipe.setId(10L);
+
+        RecipeIngredient pasta = new RecipeIngredient();
+        pasta.setIngredientName("pasta");
+        pasta.setQuantity(100.0);
+
+        NutritionInfo pastaInfo = new NutritionInfo();
+        pastaInfo.setItemName("pasta");
+        pastaInfo.setBaseQuantity(100.0);
+        pastaInfo.setCalories(350.0);
+        pastaInfo.setProtein(12.0);
+        pastaInfo.setFibers(3.0);
+
+        when(recipeRepository.findById(10L)).thenReturn(Optional.of(recipe));
+        when(recipeIngredientRepository.findByRecipeId(10L)).thenReturn(List.of(pasta));
+        when(nutritionInfoRepository.findById("pasta")).thenReturn(Optional.of(pastaInfo));
+
+        RecipeNutrition n = service.computeRecipeNutrition(10L, 2.0);
+
+        // 100g * 2 servings = 200g -> 2x the 100g base
+        assertThat(n.calories()).isEqualTo(700.0);
+        assertThat(n.protein()).isEqualTo(24.0);
+        assertThat(n.fiber()).isEqualTo(6.0);
+        assertThat(n.complete()).isTrue();
+    }
+
+    @Test
+    void computeRecipeNutrition_flagsIncompleteWhenAnIngredientHasNoCalories() {
+        Recipe recipe = new Recipe();
+        recipe.setId(11L);
+
+        RecipeIngredient known = new RecipeIngredient();
+        known.setIngredientName("rice");
+        known.setQuantity(100.0);
+
+        RecipeIngredient mystery = new RecipeIngredient();
+        mystery.setIngredientName("mystery spice");
+        mystery.setQuantity(5.0);
+
+        NutritionInfo riceInfo = new NutritionInfo();
+        riceInfo.setItemName("rice");
+        riceInfo.setBaseQuantity(100.0);
+        riceInfo.setCalories(360.0);
+
+        NutritionInfo mysteryInfo = new NutritionInfo();
+        mysteryInfo.setItemName("mystery spice");
+        mysteryInfo.setBaseQuantity(100.0);
+        // no calories -> even after USDA/AI it's still unknown
+
+        when(recipeRepository.findById(11L)).thenReturn(Optional.of(recipe));
+        when(recipeIngredientRepository.findByRecipeId(11L)).thenReturn(List.of(known, mystery));
+        when(nutritionInfoRepository.findById("rice")).thenReturn(Optional.of(riceInfo));
+        when(nutritionInfoRepository.findById("mystery spice")).thenReturn(Optional.of(mysteryInfo));
+
+        RecipeNutrition n = service.computeRecipeNutrition(11L, 1.0);
+
+        assertThat(n.calories()).isEqualTo(360.0);
+        assertThat(n.complete()).isFalse();
     }
 
     // ---- logMeal ----
