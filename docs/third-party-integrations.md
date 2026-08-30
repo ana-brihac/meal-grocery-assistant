@@ -25,28 +25,35 @@
   if nutrition numbers look implausible, check `nutrition_info.item_name`'s cached row and compare
   against what USDA's `/foods/search` actually returns for that query before assuming a bug
   elsewhere. See `docs/known-issues.md`.
-- Caching: results are cached by normalized item name in `nutrition_info` (see `docs/database.md`),
-  including a null-macro row when there's no match, so a given name is never looked up twice.
+- Caching: results are cached by normalized item name in `nutrition_info` (see `docs/database.md`).
+  On a USDA miss the lookup then tries the Gemini fallback below; if that's also empty, a
+  null-macro row is still cached so the name is never looked up twice. Delete null-macro rows to
+  force a re-fetch (e.g. after fixing a bad key).
 
-## Gemini (receipt OCR)
+## Gemini (receipt OCR, price-tag OCR, nutrition fallback)
 
-- Client: `common/client/OcrClient.java` (plain `RestTemplate`).
-- Config: `ocr.api-url` / `ocr.api-key` in `application.yml`, key comes from env var
-  `OCR_API_KEY`. Endpoint is hardcoded to
-  `gemini-flash-latest:generateContent` (`generativelanguage.googleapis.com`).
-- Request: image is base64-encoded and sent inline (`inline_data`) alongside a fixed prompt asking
-  Gemini to extract items/quantities/prices as structured JSON. No streaming, no retries.
-- Response parsing: `OcrClient.parse` manually walks `candidates[0].content.parts[0].text` using
-  `json-simple` (not Jackson — note this is a different JSON library than `ReceiptParser` uses one
-  step later, which uses Jackson's `ObjectMapper`). Throws a `RuntimeException` if the shape is
-  unexpected — this propagates up through the async chain and is only logged to stderr (see
-  `docs/backend-api.md`, receipt upload flow).
+Three uses, all against the same `generativelanguage.googleapis.com`
+`gemini-flash-latest:generateContent` endpoint, all keyed by `ocr.api-key` /
+env var `OCR_API_KEY` (the `ocr.*` config names predate the other two uses).
+
+- **`common/client/OcrClient.java`** (plain `RestTemplate`, response parsed with `json-simple`).
+  `extractTextFromImage(bytes, contentType)` sends the image inline (`inline_data`) with a fixed
+  receipt prompt; the `(bytes, contentType, prompt)` overload takes a caller-supplied prompt and
+  is used for shelf price tags (`POST /api/prices/from-photo` → `IngredientPriceService`). Walks
+  `candidates[0].content.parts[0].text`; throws `RuntimeException` on an unexpected shape.
+- **`common/client/NutritionAiClient.java`** (plain `RestTemplate` + Jackson). Text-only call —
+  no image — asking for a food's per-100g macros as a JSON object. Called by
+  `NutritionService.getOrFetchNutritionInfo` only when USDA returns no calories. Never throws: a
+  failed call just leaves the food's macros null.
 - Gemini's text output isn't guaranteed valid JSON — it commonly wraps it in a ` ```json ` markdown
-  fence, which `ReceiptParser` strips with a regex before parsing. If Gemini changes its output
-  format, this is the first place to look.
+  fence, stripped with a regex before parsing (`ReceiptParser` for receipts, the client itself for
+  price tags / nutrition). If Gemini changes its output format, that's the first place to look.
+- If Google flags the key as leaked and disables it, every Gemini-backed feature 403s. Rotate the
+  key; nutrition lookups that were attempted while it was dead are cached null and need their rows
+  deleted to retry.
 
 ## ml-service (internal, not third-party, but similar integration shape)
 
-The backend also calls its own `ml-service` over plain HTTP (`MlServiceClient`, Spring
-`RestClient`), currently only for a `/ping` passthrough. See `docs/ml-service.md` — it's a scaffold,
-not a real integration yet.
+The backend calls its own `ml-service` over plain HTTP via `MlServiceClient` (Spring `WebClient`,
+5s timeout) for `POST /recommendations`, used by `rankBy=mealHistory` recipe search. See
+`docs/ml-service.md`.

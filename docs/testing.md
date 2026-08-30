@@ -11,25 +11,37 @@ All tests are JUnit 5 + Mockito, no Spring context loaded (fast, no Postgres nee
 
 **What's actually covered:**
 
-- `NutritionServiceTest` (8 tests) — cache hit/miss on `getOrFetchNutritionInfo`, `logMeal` saves a
-  log row, `logRecipe` saves one log row per ingredient scaled by servings and tagged with
-  `recipeId` (plus the unknown-recipe-id error case), `getDailyBreakdown` populating
-  `recipeId`/`recipeName` on a recipe-sourced entry, `getSummary` totals (including the zero-logs
-  case and a real multiplier calculation).
+- `NutritionServiceTest` (~13 tests) — cache hit/miss on `getOrFetchNutritionInfo` (incl. the
+  Gemini fallback filling macros on a USDA miss), `logMeal` saves a log row, `logRecipe` saves one
+  log row per ingredient scaled by servings and tagged with `recipeId` (plus the unknown-recipe-id
+  error case), `computeRecipeNutrition` sums ingredient macros scaled by servings and flags
+  `complete=false` when an ingredient has no calories, `getDailyBreakdown` populating
+  `recipeId`/`recipeName`, `getSummary` totals (zero-logs case + a real multiplier calculation).
 - `SpendingServiceTest` (3 tests) — zero receipts, summing multiple receipts, skipping a receipt
   with a null `totalAmount`.
-- `RecipeServiceTest` (5 tests) — ingredients get lower-cased before querying, no-match returns an
-  empty result (not null), result order follows whatever `RecipeRankingService` returns, and (Phase
-  5) `rankBy=mealHistory` routes to `rankByMealHistorySimilarity`, with a fallback to the default
-  ingredient ranking when that throws.
+- `RecipeServiceTest` (8 tests) — ingredients get lower-cased before querying, no-match returns an
+  empty result (not null), result order follows whatever `RecipeRankingService` returns,
+  `rankBy=mealHistory` routes to `rankByMealHistorySimilarity` with a fallback when it throws, and
+  the CRUD path: `createRecipe` saves the recipe then the ingredient rows with the new id,
+  `updateRecipe` replaces the ingredient list wholesale, unknown id throws.
 - `RecipeRankingServiceTest` (2 tests) — fewest-ingredients-first ordering, empty candidates list.
-  (Does **not** cover `rankByMealHistorySimilarity` — that path is exercised via `RecipeServiceTest`
-  and `MlServiceClientTest`.)
-- `MlServiceClientTest` (2 tests, Phase 5) — spins up a real `com.sun.net.httpserver.HttpServer` on
-  a random port (no wiremock/mockwebserver dependency): one test asserts a real
-  `POST /recommendations` round-trip serializes the request and parses `{"results":[...]}`; the
-  other asserts the configured 5-second timeout actually fires when the server hangs (so this class
-  takes ~5s to run).
+  (`rankByMealHistorySimilarity` is exercised via `RecipeServiceTest` and `MlServiceClientTest`.)
+- `MlServiceClientTest` (2 tests) — spins up a real `com.sun.net.httpserver.HttpServer` on a random
+  port (no wiremock/mockwebserver dependency): one asserts a real `POST /recommendations`
+  round-trip serializes the request and parses `{"results":[...]}`; the other asserts the 5-second
+  timeout fires when the server hangs (so this class takes ~5s to run).
+- `MealPlanOptimizerTest` (8 tests) — pure, no Spring. Every slot filled with distinct recipes and
+  no warnings when a day is in band; weekly-budget cutoff skips an unaffordable recipe; a day that
+  can't reach the calorie band comes back with a warning; empty candidates → empty plan + warnings;
+  `mealPrepBatchSize=3` reuses one recipe across three consecutive same-meal slots;
+  `selectReplacement` picks in-room / not-excluded, falls back to closest + warning, throws when
+  every candidate is excluded.
+- `IngredientPriceServiceTest` (15 tests) — receipt upsert: new row defaults to `PER_ITEM`/RECEIPT,
+  name normalized before lookup, unchanged price doesn't touch change-tracking, changed price
+  records `previousPrice` + `priceChangedAt`, a receipt upsert doesn't clobber a manual
+  `pricing_mode`, null/zero price is skipped; `addManualPrice` sets mode + `gramsPerItem`, invalid
+  mode throws; `estimateIngredientCost` for `PER_KG`, `PER_ITEM` with/without `gramsPerItem`, and
+  no row; `addFromPhoto` OCRs with the price-tag prompt, parses, upserts, and rejects garbage.
 
 **What's not covered — these test files exist but are empty stubs, not placeholders with `@Disabled`
 or a TODO, just genuinely empty:**
@@ -44,9 +56,10 @@ particular has non-trivial logic (markdown-fence stripping, handling both bare-a
 parsing untrusted LLM output.
 
 Also uncovered, and with no empty stub file even flagging it: `UserPreferenceService` (defaults
-fallback, single-row upsert) and `NutritionService.getSummary`'s recipe-sourced-entries gap (see
-`docs/database.md`'s note on `logRecipe` leaving `user_id` null) — both worth real tests given the
-day-boundary, null-macro, and null-`user_id` edge cases involved. `RecipeDataLoader` and
+fallback, single-row upsert), `NutritionService.getSummary`'s recipe-sourced-entries gap, and the
+meal-plan / grocery-list orchestration — `MealPlanService` and `GroceryListService` (aggregation,
+inventory subtraction, delete-then-insert) have no tests; only `MealPlanOptimizer` and
+`IngredientPriceService` are covered directly. `RecipeDataLoader` and
 `RecipeRepository.findRecipesMakeableFrom` also have no automated coverage — both need a real
 Postgres instance to test meaningfully (custom `@Query` JPQL, file/classpath reading), which is
 outside this repo's current no-Spring-context unit test setup.
@@ -54,7 +67,7 @@ outside this repo's current no-Spring-context unit test setup.
 There is no CI configured (no `.github/workflows` or equivalent) — `mvn test` only runs when someone
 runs it locally.
 
-## ml-service unit tests (Phase 5)
+## ml-service unit tests
 
 ```
 cd ml-service
@@ -69,8 +82,7 @@ a candidate pointing the same direction as the history vector above one pointing
 (asserts both order and the cosine values), and an empty candidate list returns `[]`.
 
 First run is **slow** — cold `torch`/`transformers` import plus a one-time ~80 MB model download
-from Hugging Face (needs network). After that it's a few seconds. A passing run here is real signal;
-before Phase 5's dependencies were installed the file couldn't even be collected.
+from Hugging Face (needs network). After that it's a few seconds.
 
 There are no FastAPI-level (`TestClient`) tests and no CI for `ml-service` either.
 
@@ -98,9 +110,11 @@ Postgres). To verify the nutrition/spending stack actually works end-to-end, sta
    regardless of casing/quantity tokens in the input (`milk almond`), and that repeated noisy
    variants don't create duplicate `nutrition_info` rows.
 
-4. **Log an item USDA won't match** (e.g. a nonsense string) — expect `201` with a
-   `nutrition_info` row saved with null macros, not a 500. (If USDA itself errors — 429/5xx — expect
-   a clean `502` instead, via `NutritionApiException`.)
+4. **Log an item nothing can match** (e.g. a nonsense string) — expect `201`. The lookup tries
+   USDA, then a Gemini per-100g estimate; if both come back empty the `nutrition_info` row is
+   saved with null macros, not a 500. (If USDA itself errors — 429/5xx — expect a clean `502`
+   instead, via `NutritionApiException`.) A row cached with null macros is not retried — delete it
+   to force a re-fetch.
 
 5. **Hit the summary endpoints** and check the totals against what's actually in `nutrition_log` /
    `receipts` — the multiplier per log row is `quantity_grams / nutrition_info.base_quantity`.
@@ -111,12 +125,14 @@ Postgres). To verify the nutrition/spending stack actually works end-to-end, sta
    ```
    to confirm real persistence, not just 200-status theater.
 
-## Recipes (Phase 4)
+## Recipes
 
-`RecipeDataLoader` needs `java-backend/src/main/resources/data/recipes.csv` to exist — it isn't
-checked into the repo yet (see `RecipeDataLoader.java` for the expected column format: one row per
-ingredient, `recipe_name,instructions,source,ingredient_name,quantity,unit`, `quantity` in grams).
-Without that file, the app boots fine and `/api/recipes/search` just returns an empty list.
+`RecipeDataLoader` needs `java-backend/src/main/resources/data/recipes.csv` (see
+`RecipeDataLoader.java` for the expected column format: one row per ingredient,
+`recipe_name,instructions,source,ingredient_name,quantity,unit`, `quantity` in grams). Without that
+file the app boots fine and `/api/recipes/search` just returns an empty list. The loader is a
+no-op if `recipes` already has rows — clear `recipes` + `recipe_ingredients` to re-import. Recipes
+can also be added/edited at runtime via `POST` / `PUT /api/recipes`.
 
 Once the CSV is in place and the app has been started against a real Postgres (so
 `RecipeDataLoader` has actually run):
@@ -146,13 +162,37 @@ Once the CSV is in place and the app has been started against a real Postgres (s
    Entries from step 2 should have `recipeId`/`recipeName` populated on that day; manually-logged
    entries (via `/api/nutrition/log`) should have both `null`.
 
-## Recipe recommendations (Phase 5)
+## Meal planning + grocery lists
+
+Needs `recipes.csv` loaded and at least a few `ingredient_price` rows for the budget constraint to
+mean anything.
+
+1. **Seed prices** — `POST /api/prices` with `{"itemName":"chicken breast","price":8.5,
+   "pricingMode":"PER_KG"}`, or upload a receipt.
+2. **Generate a plan**:
+   ```
+   curl -X POST http://localhost:8080/api/mealplan/generate \
+     -H "Content-Type: application/json" -d '{"weekStartDate":"2026-09-01"}'
+   ```
+   Expect a plan id, one slot per (day, meal type), per-slot calorie/protein/fiber/cost
+   contributions, `totalEstimatedCost` vs `budget`, and `warnings` for any day outside the calorie
+   band or below the macro floors. `nutritionIncomplete` / `costIncomplete` flag partial data.
+3. **Swap a slot** — `POST /api/mealplan/{id}/slots/{slotId}/replace`. The replacement should keep
+   that day within its remaining calorie room; a grocery list already generated for the plan flips
+   to `stale`.
+4. **Reuse a plan** — `POST /api/mealplan/{id}/select` with a new `weekStartDate`. A new `SELECTED`
+   plan appears in `GET /api/mealplan`; days that no longer fit the current targets get re-optimised.
+5. **Grocery list** — `POST /api/grocerylist/generate` with `{"mealPlanId": <id>}`. Ingredients
+   already in `inventory_items` (by name) are dropped; the rest are priced. `PATCH
+   /api/grocerylist/items/{itemId}?purchased=true` checks one off.
+
+## Recipe recommendations
 
 Needs `ml-service` running (`cd ml-service && uvicorn app.main:app --port 8000`) in addition to the
 backend, plus some `nutrition_log` history to rank against (log a few meals first).
 
-1. **Default ranking is unchanged** — `GET /api/recipes/search?ingredients=...` with no `rankBy`
-   still returns fewest-ingredients-first. Confirm Phase 4 behaviour didn't move.
+1. **Default ranking** — `GET /api/recipes/search?ingredients=...` with no `rankBy` returns
+   fewest-ingredients-first.
 
 2. **`rankBy=mealHistory` re-orders by taste** — add `&rankBy=mealHistory`. Recipes closer to what's
    in `nutrition_log` should rise to the top. The response shape is identical (no score field is

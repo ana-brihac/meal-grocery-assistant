@@ -7,7 +7,7 @@ from app.schemas.recommendation_schemas import RecipeCandidate, RecipeScore
 
 # TODO: once budget/calorie-aware ranking lands, this will likely need to combine
 # similarity with other UserPreference-derived factors — see java-backend's
-# RecipeRankingService.rankRecipes for the equivalent hook on the Java side. Phase 5 stays
+# RecipeRankingService.rankRecipes for the equivalent hook on the Java side. This stays
 # similarity-only; don't implement budget/calorie weighting here yet.
 # HINT: cosine similarity between vector a and vector b is dot(a, b) / (norm(a) * norm(b)). To
 # score every candidate at once instead of looping: np.vstack(candidate_embeddings) to get a 2D

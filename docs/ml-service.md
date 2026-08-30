@@ -1,12 +1,12 @@
 # ml-service (Python / FastAPI)
 
-## Current state: one real feature (Phase 5) + a legacy ping
+## Current state: one real feature + a legacy ping
 
 `ml-service/` is a FastAPI app with two routes:
 
-- `POST /recommendations` — the Phase 5 recipe-recommendation endpoint (real).
-- `GET /ping` — leftover connectivity check from Phase 1: `{"status": "ok", "service": "python"}`.
-  Nothing calls it any more (the Java side stopped using it in Phase 5) — safe to delete whenever.
+- `POST /recommendations` — the recipe-recommendation endpoint (real).
+- `GET /ping` — a leftover connectivity check: `{"status": "ok", "service": "python"}`. Nothing
+  calls it any more (the Java side stopped using it) — safe to delete whenever.
 
 There is **no database access** here. `ml-service` is a pure function: it receives candidate recipes
 and meal history in the request body, embeds them, scores them, and returns a ranked list.
@@ -34,8 +34,7 @@ Pipeline (`app/routers/recommendations.py` → `app/services/`):
 
 1. **`embedding_service.embed_recipe_text(candidate)`** — builds the string
    `"<name>: <ing> <qty> <unit>, <ing> <qty> <unit>, ..."` and encodes it. One vector per candidate.
-   (Instructions are not embedded — the schema doesn't carry them; name + ingredients was the
-   Phase 5 decision.)
+   (Instructions are not embedded — the schema doesn't carry them; name + ingredients only.)
 2. **`embedding_service.embed_meal_history(meal_history)`** — encodes each entry's `name` and returns
    the **mean** of those vectors. Empty history → a zero vector of the model's dimension.
    (`logged_at` is carried in the schema but not currently used — no recency weighting yet.)
@@ -88,7 +87,7 @@ Call path: `RecipeService.searchRecipes` (when `rankBy=mealHistory`) →
 → `MlServiceClient.getRecommendations` → reorders the `Recipe` list by returned score.
 
 **Graceful degradation:** if `MlServiceClient` throws (connection refused, timeout, 5xx),
-`RecipeService.rankByMealHistoryWithFallback` catches it and falls back to the Phase 4
+`RecipeService.rankByMealHistoryWithFallback` catches it and falls back to the default
 fewest-ingredients ordering. `/api/recipes/search` never fails just because `ml-service` is down.
 
 Base URL: `ml-service.base-url` in `application.yml`, default `http://localhost:8000`.

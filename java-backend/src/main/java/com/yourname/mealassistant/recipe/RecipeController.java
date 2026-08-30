@@ -24,9 +24,9 @@ public class RecipeController {
     // Decided: no userId param, unlike NutritionController/SpendingController — this app is
     // single-tenant in practice today (UserPreference is a singleton row, no auth/multi-user
     // support), so RecipeService looks up "the" inventory rather than a per-user one.
-    // rankBy=mealHistory switches to Phase 5's meal-history-similarity ranking instead of the
-    // default fewest-ingredients rule; omitted/anything else keeps the default (unchanged from
-    // Phase 4). See RecipeService.searchRecipes for the fallback behavior if ml-service is down.
+    // rankBy=mealHistory switches to the meal-history-similarity ranking instead of the
+    // default fewest-ingredients rule; omitted/anything else keeps the default. See
+    // RecipeService.searchRecipes for the fallback behavior if ml-service is down.
     @GetMapping("/search")
     public ResponseEntity<ApiResponse<RecipeSearchResponse>> search(
             @RequestParam List<String> ingredients,

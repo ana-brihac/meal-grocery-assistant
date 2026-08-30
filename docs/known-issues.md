@@ -1,5 +1,14 @@
 # Known issues / TODOs
 
+## Recently fixed (2026-08-31)
+
+- **Hardcoded API keys were in git history.** Early commits carried a real Gemini key and USDA key
+  in `java-backend/src/main/resources/application.yml` (and a `target/classes/` copy). The keys
+  have been rotated and history was rewritten (`git filter-repo`) to strip them and to remove
+  `java-backend/target/` from every commit. `application.yml` now uses `${OCR_API_KEY}` /
+  `${USDA_API_KEY}` placeholders; `.env` is gitignored and untracked. `target/` is no longer
+  tracked (`git rm --cached`).
+
 ## Recently fixed (2026-08-23, commit `d694799`)
 
 These were found by actually running the full stack against real Postgres + USDA, not just
@@ -32,10 +41,10 @@ passing while the real thing is broken) can easily recur:
   managed executor — so this config class does nothing. Either implement it (a dedicated executor
   bean, sized appropriately, wired via `@Async`) or delete it so it doesn't look like unfinished
   wiring.
-- **ml-service isn't containerized.** `ml-service/requirements.txt` is now filled in and pinned
-  (Phase 5), but `ml-service/Dockerfile` is still an empty file and `docker-compose.yml` has no
-  `ml-service` entry — only Postgres comes up via compose. Run `ml-service` by hand with `uvicorn`.
-  See `docs/ml-service.md`.
+- **ml-service isn't containerized.** `ml-service/requirements.txt` is filled in and pinned, but
+  `ml-service/Dockerfile` is still an empty file and `docker-compose.yml` has no `ml-service`
+  entry — only Postgres comes up via compose. Run `ml-service` by hand with `uvicorn`. See
+  `docs/ml-service.md`.
 - **ml-service has no FastAPI-level tests and no CI.** `tests/test_recommendation_service.py` tests
   the service functions directly (3 tests); there's no `TestClient` test of `POST /recommendations`
   itself, and nothing runs `pytest` automatically. The Java `MlServiceClientTest` covers the HTTP
@@ -49,8 +58,7 @@ passing while the real thing is broken) can easily recur:
 - **Zero test coverage for two classes.** `InventoryServiceTest.java` and `ReceiptParserTest.java`
   exist as files but are completely empty — not stubs with a TODO, just empty. `mvn test` passes
   cleanly with no signal about either area. `ReceiptParser` in particular is parsing untrusted LLM
-  output and would benefit most from real tests. (`MlServiceClientTest.java` was in this list until
-  Phase 5 — it now has real tests.)
+  output and would benefit most from real tests.
 - **No CI.** No `.github/workflows` or equivalent — tests only run when someone remembers to run
   them locally.
 - **Receipt upload has no failure feedback.** `POST /api/receipts/upload` returns success
@@ -81,9 +89,6 @@ passing while the real thing is broken) can easily recur:
 - **No test coverage for the new preferences/nutrition-calendar work**: `UserPreferenceService` and
   `NutritionService.getDailyBreakdown` have no tests at all (not even empty stub files). See
   `docs/testing.md`.
-- **`java-backend/target/` build artifacts are tracked in git** despite `target/` being in
-  `.gitignore` — leftover from before the ignore rule was added (`git rm --cached` was never run).
-  Produces noisy, meaningless diffs when built on a different machine or OS.
 - **Package name `com.yourname.mealassistant`** is a leftover Spring Initializr placeholder, never
   renamed to something real.
 - **`GET /api/inventory` has no pagination** — returns every row, unbounded.
@@ -91,3 +96,31 @@ passing while the real thing is broken) can easily recur:
   (2026-08-23) — if you're reading an older checkout, they may still be blank.
 - **`receipttest.png`** sits at the repo root with no README/reference to it — looks like a manual
   test asset that never got moved into a fixtures directory or `.gitignore`d.
+
+### Meal planning / grocery lists / pricing
+
+- **The optimizer's scoring weights are untuned.** `MealPlanOptimizer.W_CALORIE / W_PROTEIN /
+  W_FIBER / W_COST` and `MIN_MACRO_FRACTION` (0.90) are hand-picked constants, never validated
+  against real recipe data. The greedy fill is single-pass with no local-repair — infeasible days
+  come back with a warning rather than a better arrangement. Good enough to demo; revisit with a
+  real recipe set.
+- **A thin recipe pool starves slot replacement.** `replaceSlot` / `selectForWeek` exclude every
+  recipe already in the plan, so with N recipes and a 21-slot plan only N−21 candidates remain for
+  a swap. Small `recipes.csv` → frequent "No alternative recipe available" warnings.
+- **First plan on a cold `nutrition_info` cache is slow.** `computeRecipeNutrition` runs
+  cache-or-fetch per ingredient of every recipe, so the first `generate` triggers a USDA (and
+  occasionally Gemini) round-trip per new ingredient. Cached afterward.
+- **`PER_ITEM` prices with no `grams_per_item` can't be applied.** `estimateIngredientCost` returns
+  empty for them (recipe quantities are grams; without a per-unit weight there's no conversion) —
+  the recipe/list is flagged `costIncomplete`. Add `gramsPerItem` via `POST /api/prices` to fix.
+- **Regenerating a grocery list drops `purchased` ticks.** It's delete-then-insert per
+  `meal_plan_id`, so any items already checked off are lost on regenerate.
+- **Plan `warnings` aren't persisted.** `GET /api/mealplan` and `GET /api/mealplan/{id}` return an
+  empty `warnings` list — only `generate` / `replaceSlot` / `selectForWeek` populate it, from the
+  run that just happened.
+- **No `DELETE /api/recipes/{id}`.** A recipe is FK-referenced by `meal_plan_slot`,
+  `nutrition_log.recipe_id`, and the unused `meals` table, so a hard delete would fail. Needs a
+  decision: block-if-referenced, soft-delete flag, or null the references.
+- **No tests for `MealPlanService`, `GroceryListService`'s persistence path, or the controllers.**
+  `MealPlanOptimizerTest` covers the algorithm and `IngredientPriceServiceTest` the pricing rules,
+  but the orchestration + DB round-trips are only exercised by hand.

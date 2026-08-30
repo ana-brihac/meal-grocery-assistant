@@ -7,7 +7,7 @@ import jakarta.persistence.*;
 // add `source`) rather than introducing a separately-named table — no prep time field, so this
 // entity is close to what already exists.
 // TODO: `meals` (also in 001_init_schema.sql, meals.recipe_id -> recipes(id)) isn't wired into
-// this feature yet — not needed for Phase 4, revisit when meal planning is built.
+// this feature yet — revisit when meal planning is built.
 @Entity
 @Table(name = "recipes")
 public class Recipe {

@@ -37,7 +37,7 @@ public class RecipeRankingService {
     // constraint enforcement lives entirely in mealplan/optimizer/MealPlanOptimizer, which is the
     // single constraint engine — RecipeRankingService gets no UserPreference parameter and no
     // budget/calorie awareness, so there is zero constraint-logic duplication between the two.
-    // (The Phase 4 hook comment that used to sit at the bottom of this file predicted a
+    // (An older hook comment here predicted a
     // UserPreference overload here; that was resolved the other way.)
     public List<Recipe> rankRecipes(List<Recipe> candidates, List<InventoryItem> availableInventory) {
         return candidates.stream()
@@ -45,7 +45,7 @@ public class RecipeRankingService {
                 .toList();
     }
 
-    // Phase 5: ranks candidates by embedding similarity to the user's meal history, via
+    // Ranks candidates by embedding similarity to the user's meal history, via
     // ml-service's POST /recommendations (MlServiceClient). A separate method rather than folding
     // into rankRecipes — the two rules are independent signals (structural vs. taste-based), and
     // this one isn't wired into RecipeController/RecipeService yet, so nothing calls it yet.
