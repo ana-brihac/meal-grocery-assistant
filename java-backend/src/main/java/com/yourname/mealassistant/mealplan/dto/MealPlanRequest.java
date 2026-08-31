@@ -7,12 +7,12 @@ import java.util.List;
 // Decided: default layout is BREAKFAST / LUNCH / DINNER x 7 days starting
 //   weekStartDate. mealTypes / days let the client override that; servingsPerMeal scales
 //   nutrition + cost.
-// DECISION: remaining field questions —
-//   - are `mealTypes` and `days` truly client-overridable, or fixed for now with this record
-//     only carrying weekStartDate + servingsPerMeal?
-//   - nullable-with-defaults here, or required and defaulted in the controller/service?
-//   - does the request ever carry target overrides, or always the stored UserPreference?
-//     (Decided elsewhere: always the stored preference, snapshot onto the plan.)
+// Decided:
+//   - `days`, `mealTypes`, `servingsPerMeal` ARE client-overridable; all three are optional.
+//   - weekStartDate is required; the rest are nullable here and defaulted in MealPlanService
+//     (7 days / BREAKFAST,LUNCH,DINNER / 1.0 serving).
+//   - the request NEVER carries calorie/protein/fiber/budget overrides — those always come from
+//     the stored UserPreference and are snapshot onto the plan.
 public record MealPlanRequest(
         LocalDate weekStartDate,
         Integer days,

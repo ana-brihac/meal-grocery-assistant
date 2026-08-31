@@ -31,8 +31,8 @@ package layout and `docs/database.md` for persistence.
 | `/api/mealplan/{id}` | GET | — | `ApiResponse<MealPlanResponse>` |
 | `/api/mealplan/{id}/slots/{slotId}/replace` | POST | optional `{excludeRecipeIds?}` (`SlotReplacementRequest`) | `ApiResponse<MealPlanResponse>` — swaps one slot for a fitting alternative; marks any grocery list for the plan stale |
 | `/api/mealplan/{id}/select` | POST | `{weekStartDate}` (`SelectPlanRequest`) | `ApiResponse<MealPlanResponse>` — clones this plan into a new `SELECTED` plan for that week, re-checked against current targets |
-| `/api/grocerylist/generate` | POST | `{mealPlanId}` (`GroceryListRequest`) | `ApiResponse<GroceryListResponse>` — aggregates the plan's ingredients minus inventory, prices the rest; regenerating replaces the previous list |
-| `/api/grocerylist/{mealPlanId}` | GET | — | `ApiResponse<GroceryListResponse>` — `stale: true` if a slot was swapped since it was generated |
+| `/api/grocerylist/generate` | POST | `{mealPlanId}` (`GroceryListRequest`) | `ApiResponse<GroceryListResponse>` — aggregates the plan's ingredients minus inventory, prices the rest; regenerating replaces the previous list. `missingPrices: [{ingredientName, reason}]` names every ingredient that couldn't be priced (`reason` = `NO_PRICE_ON_FILE` or `NEEDS_GRAMS_PER_ITEM`) so the client can prompt the user to add it via `POST /api/prices` |
+| `/api/grocerylist/{mealPlanId}` | GET | — | `ApiResponse<GroceryListResponse>` — `stale: true` if a slot was swapped since it was generated; `missingPrices` is recomputed each call, so it shrinks as prices are added |
 | `/api/grocerylist/items/{itemId}` | PATCH | `?purchased=true\|false` | `ApiResponse<GroceryListResponse>` — the refreshed list |
 
 Note the inconsistency: receipts/inventory/preferences responses are wrapped in

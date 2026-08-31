@@ -22,8 +22,8 @@ public class PricingController {
         this.service = service;
     }
 
-    // DECISION: is a "list all known prices" endpoint in scope (for a prices screen
-    //   where the user reviews/edits the catalog)? Sketched; drop if not needed this phase.
+    // Decided: keep the catalog-list endpoint — it backs a prices screen where the user
+    //   reviews/edits the catalog (and supplies gramsPerItem for PER_ITEM rows; see below).
     @GetMapping("")
     public ResponseEntity<ApiResponse<List<IngredientPrice>>> listAll() {
         return ResponseEntity.ok(ApiResponse.ok(service.findAll()));
@@ -34,8 +34,9 @@ public class PricingController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(service.addManualPrice(request)));
     }
 
-    // DECISION: does this auto-save, or return the parsed values for the user to
-    //   confirm and then POST to the endpoint above? See IngredientPriceService.addFromPhoto.
+    // Decided: this AUTO-SAVES (IngredientPriceService.addFromPhoto upserts immediately)
+    //   and returns the stored values with saved=true plus the raw OCR text, so the client can
+    //   show it for review and re-POST corrections to POST /api/prices above.
     @PostMapping("/from-photo")
     public ResponseEntity<ApiResponse<PriceTagPhotoResponse>> fromPhoto(@RequestParam("file") MultipartFile file) {
         try {

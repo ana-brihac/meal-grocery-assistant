@@ -113,6 +113,8 @@ passing while the real thing is broken) can easily recur:
 - **`PER_ITEM` prices with no `grams_per_item` can't be applied.** `estimateIngredientCost` returns
   empty for them (recipe quantities are grams; without a per-unit weight there's no conversion) —
   the recipe/list is flagged `costIncomplete`. Add `gramsPerItem` via `POST /api/prices` to fix.
+  The grocery-list response now also names these (and price-less ingredients) in `missingPrices`
+  with a `reason`, so the client can prompt the user directly; it's recomputed per response.
 - **Regenerating a grocery list drops `purchased` ticks.** It's delete-then-insert per
   `meal_plan_id`, so any items already checked off are lost on regenerate.
 - **Plan `warnings` aren't persisted.** `GET /api/mealplan` and `GET /api/mealplan/{id}` return an

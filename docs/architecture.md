@@ -177,7 +177,9 @@ ingredient's grams across the plan's slots (scaled by each slot's servings), nor
 any whose name matches an inventory item (name match only — `inventory_items` has no unit column,
 so amounts aren't reconciled), price the remainder via `IngredientPriceService`, delete the
 previous list for that plan and insert a fresh `grocery_list_item` set. `PATCH
-/api/grocerylist/items/{id}` toggles `purchased`.
+/api/grocerylist/items/{id}` toggles `purchased`. The response's `missingPrices` list names every
+ingredient that couldn't be costed and why (`NO_PRICE_ON_FILE` / `NEEDS_GRAMS_PER_ITEM`) — it's
+reclassified on every grocery-list response, so it clears as the user adds prices and refetches.
 
 - `ApiResponse<T>` (`{success, data, error}`) is used by `ReceiptController`, `InventoryController`,
   `UserPreferenceController`, `RecipeController`, `NutritionController`'s `/calendar` endpoint, and

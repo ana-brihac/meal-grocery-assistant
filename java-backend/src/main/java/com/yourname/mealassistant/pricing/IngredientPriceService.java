@@ -87,31 +87,49 @@ public class IngredientPriceService {
                 true, rawOcrText);
     }
 
+    // Why an ingredient couldn't be priced (NONE = it was). Drives the user-facing
+    // "add a price for X" notification on grocery lists / meal plans.
+    public enum PriceGap { NONE, NO_PRICE_ON_FILE, NEEDS_GRAMS_PER_ITEM }
+
+    // Cost plus the reason it's absent when it is. `cost` is empty iff `gap != NONE`.
+    public record CostEstimate(Optional<BigDecimal> cost, PriceGap gap) {
+    }
+
     // Cost of `quantityGrams` of an ingredient, or empty if it can't be determined:
     //   - no ingredient_price row (or a null price) -> empty
     //   - PER_KG            -> price * (grams / 1000)
     //   - PER_ITEM w/ gramsPerItem -> price * ceil(grams / gramsPerItem)
     //   - PER_ITEM w/o gramsPerItem -> empty (can't turn grams into a unit count)
     // Callers flag the recipe / list costIncomplete on empty; they do NOT drop the ingredient.
+    // Thin wrapper over estimateCost(...) — kept for callers that don't need the gap reason.
     public Optional<BigDecimal> estimateIngredientCost(String rawIngredientName, double quantityGrams) {
+        return estimateCost(rawIngredientName, quantityGrams).cost();
+    }
+
+    // Same lookup as estimateIngredientCost, but also reports WHY the cost is missing so the
+    // caller can tell the user what to add (a price, or a gramsPerItem for an existing one).
+    public CostEstimate estimateCost(String rawIngredientName, double quantityGrams) {
         IngredientPrice ip = ingredientPriceRepository
                 .findByItemName(ItemNameNormalizer.normalize(rawIngredientName))
                 .orElse(null);
         if (ip == null || ip.getPrice() == null) {
-            return Optional.empty();
+            return new CostEstimate(Optional.empty(), PriceGap.NO_PRICE_ON_FILE);
         }
 
         if (IngredientPrice.MODE_PER_KG.equals(ip.getPricingMode())) {
             BigDecimal kg = BigDecimal.valueOf(quantityGrams).divide(BigDecimal.valueOf(1000), 6, RoundingMode.HALF_UP);
-            return Optional.of(ip.getPrice().multiply(kg).setScale(2, RoundingMode.HALF_UP));
+            return new CostEstimate(
+                    Optional.of(ip.getPrice().multiply(kg).setScale(2, RoundingMode.HALF_UP)), PriceGap.NONE);
         }
 
         Double gramsPerItem = ip.getGramsPerItem();
         if (gramsPerItem == null || gramsPerItem <= 0) {
-            return Optional.empty();
+            return new CostEstimate(Optional.empty(), PriceGap.NEEDS_GRAMS_PER_ITEM);
         }
         long units = (long) Math.ceil(quantityGrams / gramsPerItem);
-        return Optional.of(ip.getPrice().multiply(BigDecimal.valueOf(units)).setScale(2, RoundingMode.HALF_UP));
+        return new CostEstimate(
+                Optional.of(ip.getPrice().multiply(BigDecimal.valueOf(units)).setScale(2, RoundingMode.HALF_UP)),
+                PriceGap.NONE);
     }
 
     // --- internals ---

@@ -1,5 +1,7 @@
 package com.yourname.mealassistant.grocerylist.dto;
 
+import com.yourname.mealassistant.common.dto.MissingIngredientPrice;
+
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -9,14 +11,19 @@ import java.util.List;
 //   row — estimatedTotalCost is then a lower bound.
 // Decided: stale is true when the plan's slots changed after this list was
 //   generated — the user should regenerate.
-// DECISION: exact fields otherwise — does each Item echo the persisted id (needed for
-//   the check-off PATCH) and the `purchased` flag? Sketched yes.
+// Decided: each Item echoes its persisted id (needed for the check-off PATCH) and its
+//   `purchased` flag, plus itemName / quantity / unit / estimatedCost.
+// Decided: missingPrices lists every ingredient on the list that couldn't be costed
+//   (name + reason), so the client can prompt the user to add the price via POST /api/prices.
+//   It's recomputed on every response (generate / get / check-off), so it clears as prices are
+//   added and the list is refetched — no regenerate needed just to see it shrink.
 public record GroceryListResponse(
         Long mealPlanId,
         List<Item> items,
         BigDecimal estimatedTotalCost,
         boolean costIncomplete,
-        boolean stale) {
+        boolean stale,
+        List<MissingIngredientPrice> missingPrices) {
 
     public record Item(
             Long id,

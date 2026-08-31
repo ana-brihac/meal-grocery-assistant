@@ -22,9 +22,9 @@ import java.time.LocalDateTime;
 //   String-not-enum style used elsewhere (e.g. RecipeSearchRequest.rankBy). At most one
 //   "SELECTED" plan per weekStartDate — enforced in MealPlanService, not the schema.
 //
-// DECISION: does a plan need a userId? The rest of the app is single-tenant (no auth,
-//   UserPreference is one row) — left off for now, consistent with RecipeController /
-//   NutritionController#/calendar. Flag if multi-user ever lands.
+// Decided: no userId. The app is single-tenant (no auth, UserPreference is one row),
+//   consistent with RecipeController / NutritionController#/calendar. Revisit only if
+//   multi-user auth is ever added.
 @Entity
 @Table(name = "meal_plan")
 public class MealPlan {

@@ -23,13 +23,15 @@ import java.time.LocalDateTime;
 //   price_history table. When a RECEIPT/PHOTO upsert sees a different price for a name already
 //   present, it moves the old value into previousPrice and stamps priceChangedAt.
 //
-// OPEN: PER_ITEM cost when gramsPerItem is unknown. Options: (a) assume the recipe needs 1 unit
-//   of that item regardless of its gram quantity (rough, cheap); (b) leave the ingredient's cost
-//   unknown so the whole recipe becomes costIncomplete. Not chosen — drives
-//   IngredientPriceService.estimateIngredientCost.
-// DECISION: name key. item_name is stored normalized via ItemNameNormalizer (same key
-//   space as nutrition_info) and is UNIQUE. Confirm normalization is the right key given
-//   receipt-OCR'd names are messy and a normalized collision would merge two real products.
+// Decided: PER_ITEM cost when gramsPerItem is unknown -> leave the ingredient's cost
+//   unknown (estimateIngredientCost returns empty) so the recipe / grocery line is flagged
+//   costIncomplete and the total is a stated lower bound. We do NOT assume 1 unit. That flag is
+//   the cue for the user to supply gramsPerItem (or switch the row to PER_KG) via
+//   POST /api/prices / the prices screen.
+// Decided: name key. item_name is stored normalized via ItemNameNormalizer (same key
+//   space as nutrition_info) and is UNIQUE — consistent with how nutrition_info / the whole
+//   catalog are keyed. A normalized collision merging two genuinely different products is a
+//   theoretical risk shared with the rest of the app; revisit only if it actually bites.
 @Entity
 @Table(name = "ingredient_price")
 public class IngredientPrice {

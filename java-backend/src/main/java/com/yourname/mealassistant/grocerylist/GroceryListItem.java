@@ -14,12 +14,13 @@ import java.time.LocalDateTime;
 //   mealPlanId is marked stale (this flag) — the user must regenerate; it is not auto-rebuilt.
 // Decided: `purchased` lets the UI check items off while shopping.
 //
-// DECISION: stale/generatedAt live on each item rather than on a GroceryList header
-//   row (there is no header entity). If a list ever needs its own metadata (name, total,
-//   generatedAt once), promote to a GroceryList + GroceryListItem pair. Left flat for now.
-// DECISION: regenerate semantics — does regenerating for a mealPlanId DELETE the old
-//   rows or just mark them stale and insert a new set? Sketched assuming delete-then-insert;
-//   see GroceryListService.
+// Decided: the model stays flat — stale/generatedAt live on each item, there is no
+//   GroceryList header entity. One generated list == all rows for a mealPlanId. Promote to a
+//   GroceryList + GroceryListItem pair only if a list ever needs its own metadata (name, a
+//   single stored total, one generatedAt).
+// Decided: regenerating for a mealPlanId is DELETE-then-insert (not mark-stale) — see
+//   GroceryListService.generateGroceryList. `stale` is set only by a later slot swap, never by
+//   regenerate.
 @Entity
 @Table(name = "grocery_list_item")
 public class GroceryListItem {

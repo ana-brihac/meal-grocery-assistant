@@ -23,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,6 +58,10 @@ class GroceryListServiceTest {
         return new InventoryItem(name, BigDecimal.ONE, BigDecimal.ZERO);
     }
 
+    private static IngredientPriceService.CostEstimate noCost(IngredientPriceService.PriceGap gap) {
+        return new IngredientPriceService.CostEstimate(Optional.empty(), gap);
+    }
+
     @Test
     void generate_aggregatesAcrossSlots_dropsOnHand_pricesRemainder() {
         when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of(slot(1L, 1.0), slot(2L, 2.0)));
@@ -76,16 +81,19 @@ class GroceryListServiceTest {
         assertThat(res.items().get(0).quantity()).isEqualTo(200.0);          // 100*1 + 50*2
         assertThat(res.items().get(0).estimatedCost()).isEqualByComparingTo("1.20");
         assertThat(res.costIncomplete()).isFalse();
+        assertThat(res.missingPrices()).isEmpty();
         verify(groceryListRepository).deleteAll(anyIterable());
     }
 
     @Test
-    void generate_missingPrice_keepsItemWithNullCostAndFlagsIncomplete() {
+    void generate_missingPrice_keepsItemWithNullCostFlagsIncompleteAndNamesItInMissingPrices() {
         when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of(slot(1L, 1.0)));
         when(recipeIngredientRepository.findByRecipeId(1L)).thenReturn(List.of(ing("saffron", 2.0, "g")));
         when(inventoryRepository.findAll()).thenReturn(List.of());
         when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of());
         when(ingredientPriceService.estimateIngredientCost(eq("saffron"), anyDouble())).thenReturn(Optional.empty());
+        when(ingredientPriceService.estimateCost(eq("saffron"), anyDouble()))
+                .thenReturn(noCost(IngredientPriceService.PriceGap.NO_PRICE_ON_FILE));
         when(groceryListRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
 
         GroceryListResponse res = service.generateGroceryList(new GroceryListRequest(7L));
@@ -93,6 +101,27 @@ class GroceryListServiceTest {
         assertThat(res.items()).hasSize(1);
         assertThat(res.items().get(0).estimatedCost()).isNull();
         assertThat(res.costIncomplete()).isTrue();
+        assertThat(res.missingPrices()).hasSize(1);
+        assertThat(res.missingPrices().get(0).ingredientName()).isEqualTo("saffron");
+        assertThat(res.missingPrices().get(0).reason()).isEqualTo("NO_PRICE_ON_FILE");
+    }
+
+    @Test
+    void generate_perItemPriceMissingGramsPerItem_reportsNeedsGramsPerItemReason() {
+        when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of(slot(1L, 1.0)));
+        when(recipeIngredientRepository.findByRecipeId(1L)).thenReturn(List.of(ing("egg", 100.0, "g")));
+        when(inventoryRepository.findAll()).thenReturn(List.of());
+        when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of());
+        when(ingredientPriceService.estimateIngredientCost(eq("egg"), anyDouble())).thenReturn(Optional.empty());
+        when(ingredientPriceService.estimateCost(eq("egg"), anyDouble()))
+                .thenReturn(noCost(IngredientPriceService.PriceGap.NEEDS_GRAMS_PER_ITEM));
+        when(groceryListRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
+
+        GroceryListResponse res = service.generateGroceryList(new GroceryListRequest(7L));
+
+        assertThat(res.missingPrices()).hasSize(1);
+        assertThat(res.missingPrices().get(0).ingredientName()).isEqualTo("egg");
+        assertThat(res.missingPrices().get(0).reason()).isEqualTo("NEEDS_GRAMS_PER_ITEM");
     }
 
     @Test
@@ -107,6 +136,7 @@ class GroceryListServiceTest {
 
         assertThat(res.items()).isEmpty();
         assertThat(res.costIncomplete()).isFalse();
+        assertThat(res.missingPrices()).isEmpty();
     }
 
     @Test
@@ -119,12 +149,15 @@ class GroceryListServiceTest {
 
         when(groceryListRepository.findById(99L)).thenReturn(Optional.of(item));
         when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of(item));
+        when(ingredientPriceService.estimateCost(anyString(), anyDouble()))
+                .thenReturn(noCost(IngredientPriceService.PriceGap.NO_PRICE_ON_FILE));
 
         GroceryListResponse res = service.setPurchased(99L, true);
 
         assertThat(item.getPurchased()).isTrue();
         assertThat(res.items()).hasSize(1);
         assertThat(res.items().get(0).purchased()).isTrue();
+        assertThat(res.missingPrices()).extracting("ingredientName").containsExactly("flour");
         verify(groceryListRepository).save(item);
     }
 
@@ -139,6 +172,8 @@ class GroceryListServiceTest {
         stale.setItemName("b");
         stale.setStale(true);
         when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of(fresh, stale));
+        when(ingredientPriceService.estimateCost(anyString(), anyDouble()))
+                .thenReturn(noCost(IngredientPriceService.PriceGap.NO_PRICE_ON_FILE));
 
         GroceryListResponse res = service.getGroceryList(7L);
 

@@ -1,5 +1,6 @@
 package com.yourname.mealassistant.grocerylist;
 
+import com.yourname.mealassistant.common.dto.MissingIngredientPrice;
 import com.yourname.mealassistant.common.util.ItemNameNormalizer;
 import com.yourname.mealassistant.grocerylist.dto.GroceryListRequest;
 import com.yourname.mealassistant.grocerylist.dto.GroceryListResponse;
@@ -34,7 +35,9 @@ import java.util.stream.Collectors;
 // Decided: names are matched via ItemNameNormalizer (same key space as
 //   nutrition_info / ingredient_price).
 // Decided: an ingredient with no ingredient_price row still appears, with a null
-//   estimatedCost; the response's costIncomplete flag signals the total is a lower bound.
+//   estimatedCost; the response's costIncomplete flag signals the total is a lower bound, and
+//   the ingredient is named in the response's missingPrices list (with a reason) so the user
+//   can be prompted to add the price.
 @Service
 public class GroceryListService {
 
@@ -130,7 +133,26 @@ public class GroceryListService {
         boolean costIncomplete = items.stream().anyMatch(i -> i.getEstimatedCost() == null);
         boolean stale = items.stream().anyMatch(i -> Boolean.TRUE.equals(i.getStale()));
 
-        return new GroceryListResponse(mealPlanId, dtos, total, costIncomplete, stale);
+        // Notify the user which ingredients still need a price so they can add it (or a
+        // gramsPerItem) via POST /api/prices. Reclassified fresh each call, so it clears once
+        // the price exists and the list is refetched.
+        List<MissingIngredientPrice> missingPrices = new ArrayList<>();
+        for (GroceryListItem i : items) {
+            if (i.getEstimatedCost() != null) continue;
+            double grams = i.getQuantity() == null ? 0.0 : i.getQuantity();
+            IngredientPriceService.PriceGap gap = ingredientPriceService.estimateCost(i.getItemName(), grams).gap();
+            if (gap != IngredientPriceService.PriceGap.NONE) {
+                missingPrices.add(new MissingIngredientPrice(i.getItemName(), reasonFor(gap)));
+            }
+        }
+
+        return new GroceryListResponse(mealPlanId, dtos, total, costIncomplete, stale, missingPrices);
+    }
+
+    private static String reasonFor(IngredientPriceService.PriceGap gap) {
+        return gap == IngredientPriceService.PriceGap.NEEDS_GRAMS_PER_ITEM
+                ? MissingIngredientPrice.REASON_NEEDS_GRAMS_PER_ITEM
+                : MissingIngredientPrice.REASON_NO_PRICE_ON_FILE;
     }
 
     // Mutable accumulator for step 1.

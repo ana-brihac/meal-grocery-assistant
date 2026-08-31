@@ -18,7 +18,8 @@ public class GroceryListController {
     }
 
     // Generate (or regenerate) the list for a meal plan.
-    // DECISION: regenerate = replace vs. append — see GroceryListService.
+    // Decided: regenerate REPLACES (delete-then-insert per mealPlanId), never appends —
+    //   see GroceryListService.generateGroceryList.
     @PostMapping("/generate")
     public ResponseEntity<ApiResponse<GroceryListResponse>> generate(@RequestBody GroceryListRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(service.generateGroceryList(request)));
@@ -31,7 +32,8 @@ public class GroceryListController {
     }
 
     // Check an item off (or back on) while shopping.
-    // DECISION: PATCH vs PUT; body shape ({purchased: true}) vs a query param.
+    // Decided: PATCH (single-field partial update) with `purchased` as a query param —
+    //   matches the low-ceremony style elsewhere; no request body.
     @PatchMapping("/items/{itemId}")
     public ResponseEntity<ApiResponse<GroceryListResponse>> setPurchased(@PathVariable Long itemId,
                                                                         @RequestParam boolean purchased) {
