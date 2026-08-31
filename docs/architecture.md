@@ -59,7 +59,7 @@ searches/edits recipes, and generates weekly meal plans that respect the user's 
 | `preference` | `UserPreference` entity (daily calorie/protein/fiber targets, weekly budget, meal-prep batch size), single-row read/upsert |
 | `common.client` | External HTTP clients: `OcrClient` (Gemini — receipts + price tags), `NutritionApiClient` (USDA), `NutritionAiClient` (Gemini nutrition fallback), `MlServiceClient` (`ml-service` `POST /recommendations`, `WebClient`, 5s timeout) |
 | `common.client.dto` | `RecommendationRequest`/`RecommendationResponse` (mirror `ml-service`'s Pydantic schemas), `NutritionEstimate` |
-| `common.dto` | `ApiResponse<T>` — success/data/error envelope (only used by some controllers, see below) |
+| `common.dto` | `ApiResponse<T>` — success/data/error envelope (only used by some controllers, see below); `MissingIngredientPrice` — `{ingredientName, reason}` line item for the grocery list's un-priced ingredients |
 | `common.exception` | `GlobalExceptionHandler` — catches `NutritionApiException` → 502, everything else → 500 |
 | `common.util` | `ItemNameNormalizer` — lowercases + strips quantity tokens (`1L`, `200g`, ...) from food names |
 | `config` | `WebClientConfig` (USDA WebClient bean), `AsyncConfig` (currently empty — see `docs/known-issues.md`) |
@@ -153,7 +153,9 @@ change tracking. A receipt/photo upsert updates `price` (recording the change) b
 `pricing_mode`/`grams_per_item` already set by a manual entry; a brand-new row from a receipt
 defaults to `PER_ITEM`. `estimateIngredientCost(name, grams)` returns empty when there's no row, or
 when a `PER_ITEM` row lacks `grams_per_item` — callers then flag the recipe/list cost-incomplete
-rather than dropping it.
+rather than dropping it. `estimateCost(name, grams)` is the same lookup but also returns *why* the
+cost is missing (`PriceGap`: `NO_PRICE_ON_FILE` / `NEEDS_GRAMS_PER_ITEM` / `NONE`); the grocery list
+uses it to build its `missingPrices` notification.
 
 **Meal plan generation**:
 `POST /api/mealplan/generate` → `MealPlanService.generatePlan`: pull all recipes

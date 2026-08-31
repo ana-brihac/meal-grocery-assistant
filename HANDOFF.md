@@ -23,7 +23,10 @@ On top of that:
   reuse a past plan for a new week. `mealPrepBatchSize` (a preference) lets one cooked recipe cover
   2–3 consecutive same-meal slots.
 - **Grocery lists** — `POST /api/grocerylist/generate` turns a chosen plan into a shopping list:
-  aggregate its ingredients, drop what's already in inventory, price the rest.
+  aggregate its ingredients, drop what's already in inventory, price the rest. Ingredients with no
+  usable price are still listed and named in the response's `missingPrices` (with a `reason`:
+  `NO_PRICE_ON_FILE` or `NEEDS_GRAMS_PER_ITEM`) so the client can prompt the user to fill them in;
+  it's recomputed on every grocery-list response, so it clears as prices are added.
 
 ## Architecture at a glance
 

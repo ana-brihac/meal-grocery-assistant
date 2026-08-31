@@ -91,8 +91,8 @@ docs/           Architecture and setup notes
 | `/api/mealplan/{id}` | GET | One plan with its slots |
 | `/api/mealplan/{id}/slots/{slotId}/replace` | POST | Swap one meal for another that still fits the rest of the plan |
 | `/api/mealplan/{id}/select` | POST (`weekStartDate`) | Reuse a past plan for a week — clones it and re-checks it against current targets |
-| `/api/grocerylist/generate` | POST (`mealPlanId`) | Aggregate a plan's ingredients, subtract inventory, price the rest |
-| `/api/grocerylist/{mealPlanId}` | GET | The current grocery list for a plan |
+| `/api/grocerylist/generate` | POST (`mealPlanId`) | Aggregate a plan's ingredients, subtract inventory, price the rest; response `missingPrices` names any ingredient with no usable price |
+| `/api/grocerylist/{mealPlanId}` | GET | The current grocery list for a plan (incl. `missingPrices`, recomputed each call) |
 | `/api/grocerylist/items/{itemId}` | PATCH (`purchased`) | Check an item off while shopping |
 
 ## Meal planning
@@ -110,7 +110,12 @@ many consecutive same-meal-type slots — cook once, eat it a few times.
 
 `POST /api/grocerylist/generate` then turns a chosen plan into a shopping list: it sums every
 ingredient across the plan's recipes, drops anything already in inventory (name match only — no
-unit reconciliation), and prices the remainder from the catalog.
+unit reconciliation), and prices the remainder from the catalog. Any ingredient it can't price is
+still listed (with a null cost) and also named in the response's `missingPrices` array, each with a
+`reason` — `NO_PRICE_ON_FILE` (add one via `POST /api/prices`) or `NEEDS_GRAMS_PER_ITEM` (a
+`PER_ITEM` price exists but has no `gramsPerItem` to convert grams to a unit count). `missingPrices`
+is recalculated on every grocery-list response, so it shrinks as prices are added and the list is
+refetched — no regenerate needed.
 
 ## Testing
 

@@ -42,6 +42,15 @@ All tests are JUnit 5 + Mockito, no Spring context loaded (fast, no Postgres nee
   `pricing_mode`, null/zero price is skipped; `addManualPrice` sets mode + `gramsPerItem`, invalid
   mode throws; `estimateIngredientCost` for `PER_KG`, `PER_ITEM` with/without `gramsPerItem`, and
   no row; `addFromPhoto` OCRs with the price-tag prompt, parses, upserts, and rejects garbage.
+  (`estimateCost` shares this code path — `estimateIngredientCost` delegates to it — so the same
+  cases cover both; the gap-reason values are asserted in `GroceryListServiceTest`.)
+- `GroceryListServiceTest` (6 tests) — Mockito, no Spring. `generateGroceryList` sums an
+  ingredient's grams across slots (scaled by servings), drops names already in inventory, prices
+  the remainder, and `deleteAll`s the previous list first; an ingredient with no price is kept with
+  a null cost, flips `costIncomplete`, and is named in `missingPrices` with reason
+  `NO_PRICE_ON_FILE`; a `PER_ITEM` price missing `gramsPerItem` yields reason `NEEDS_GRAMS_PER_ITEM`;
+  inventory covering everything returns an empty list; `setPurchased` toggles the flag and returns
+  the refreshed list; `getGroceryList` reports `stale` when any row is stale.
 
 **What's not covered — these test files exist but are empty stubs, not placeholders with `@Disabled`
 or a TODO, just genuinely empty:**
@@ -56,10 +65,10 @@ particular has non-trivial logic (markdown-fence stripping, handling both bare-a
 parsing untrusted LLM output.
 
 Also uncovered, and with no empty stub file even flagging it: `UserPreferenceService` (defaults
-fallback, single-row upsert), `NutritionService.getSummary`'s recipe-sourced-entries gap, and the
-meal-plan / grocery-list orchestration — `MealPlanService` and `GroceryListService` (aggregation,
-inventory subtraction, delete-then-insert) have no tests; only `MealPlanOptimizer` and
-`IngredientPriceService` are covered directly. `RecipeDataLoader` and
+fallback, single-row upsert), `NutritionService.getSummary`'s recipe-sourced-entries gap, and
+`MealPlanService` orchestration (candidate build, target snapshot, save round-trips, `replaceSlot`,
+`selectForWeek`) — `MealPlanOptimizer` is covered directly but the service around it isn't.
+`GroceryListService` *is* covered (`GroceryListServiceTest`, above). `RecipeDataLoader` and
 `RecipeRepository.findRecipesMakeableFrom` also have no automated coverage — both need a real
 Postgres instance to test meaningfully (custom `@Query` JPQL, file/classpath reading), which is
 outside this repo's current no-Spring-context unit test setup.
@@ -184,7 +193,10 @@ mean anything.
    plan appears in `GET /api/mealplan`; days that no longer fit the current targets get re-optimised.
 5. **Grocery list** — `POST /api/grocerylist/generate` with `{"mealPlanId": <id>}`. Ingredients
    already in `inventory_items` (by name) are dropped; the rest are priced. `PATCH
-   /api/grocerylist/items/{itemId}?purchased=true` checks one off.
+   /api/grocerylist/items/{itemId}?purchased=true` checks one off. Any ingredient with no usable
+   price comes back in `missingPrices` with a `reason` (`NO_PRICE_ON_FILE` /
+   `NEEDS_GRAMS_PER_ITEM`); add the price via `POST /api/prices`, `GET /api/grocerylist/{id}` again,
+   and confirm that entry has dropped out (it's recomputed per response, no regenerate needed).
 
 ## Recipe recommendations
 
