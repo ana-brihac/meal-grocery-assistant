@@ -7,10 +7,14 @@ import com.yourname.mealassistant.inventory.InventoryRepository;
 import com.yourname.mealassistant.mealplan.MealPlanSlot;
 import com.yourname.mealassistant.mealplan.MealPlanSlotRepository;
 import com.yourname.mealassistant.pricing.IngredientPriceService;
+import com.yourname.mealassistant.common.exception.BadRequestException;
+import com.yourname.mealassistant.common.exception.NotFoundException;
 import com.yourname.mealassistant.recipe.RecipeIngredient;
 import com.yourname.mealassistant.recipe.RecipeIngredientRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -20,11 +24,15 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -178,5 +186,214 @@ class GroceryListServiceTest {
         GroceryListResponse res = service.getGroceryList(7L);
 
         assertThat(res.stale()).isTrue();
+    }
+
+    // ---- persistence path ----
+    //
+    // The existing tests above cover aggregation / pricing / inventory subtraction; these cover
+    // the DB round-trip: delete-then-insert ordering, the exact rows persisted, regenerate
+    // semantics. Pricing gap-reason logic stays IngredientPriceServiceTest's job.
+
+    private static GroceryListItem existingRow(String name, boolean purchased) {
+        GroceryListItem r = new GroceryListItem();
+        r.setItemName(name);
+        r.setPurchased(purchased);
+        return r;
+    }
+
+    @Test
+    void generate_deletesExactlyThePreviousRowsForThatPlan_beforeInsertingTheNewSet() {
+        GroceryListItem oldRow1 = existingRow("stale-a", false);
+        GroceryListItem oldRow2 = existingRow("stale-b", false);
+        when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of(slot(1L, 1.0)));
+        when(recipeIngredientRepository.findByRecipeId(1L)).thenReturn(List.of(ing("flour", 100.0, "g")));
+        when(inventoryRepository.findAll()).thenReturn(List.of());
+        when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of(oldRow1, oldRow2));
+        when(ingredientPriceService.estimateIngredientCost(eq("flour"), anyDouble()))
+                .thenReturn(Optional.of(new BigDecimal("1.00")));
+        when(groceryListRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
+
+        service.generateGroceryList(new GroceryListRequest(7L));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<GroceryListItem>> deleted = ArgumentCaptor.forClass(Iterable.class);
+        verify(groceryListRepository).deleteAll(deleted.capture());
+        assertThat(deleted.getValue()).containsExactly(oldRow1, oldRow2);
+
+        InOrder ordered = inOrder(groceryListRepository);
+        ordered.verify(groceryListRepository).deleteAll(anyIterable());
+        ordered.verify(groceryListRepository).saveAll(anyList());
+    }
+
+    @Test
+    void generate_persistedRowsCarryPlanIdNormalizedNameSummedGramsUnitCostAndFlags() {
+        when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of(slot(1L, 2.0)));
+        when(recipeIngredientRepository.findByRecipeId(1L)).thenReturn(List.of(ing("Flour", 100.0, "g")));
+        when(inventoryRepository.findAll()).thenReturn(List.of());
+        when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of());
+        when(ingredientPriceService.estimateIngredientCost("flour", 200.0))
+                .thenReturn(Optional.of(new BigDecimal("1.20")));
+        when(groceryListRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
+
+        service.generateGroceryList(new GroceryListRequest(7L));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroceryListItem>> toSave = ArgumentCaptor.forClass(List.class);
+        verify(groceryListRepository).saveAll(toSave.capture());
+        assertThat(toSave.getValue()).hasSize(1);
+        GroceryListItem row = toSave.getValue().get(0);
+        assertThat(row.getMealPlanId()).isEqualTo(7L);
+        assertThat(row.getItemName()).isEqualTo("flour");           // normalized / lowercased
+        assertThat(row.getQuantity()).isEqualTo(200.0);             // 100 g * 2 servings
+        assertThat(row.getUnit()).isEqualTo("g");
+        assertThat(row.getEstimatedCost()).isEqualByComparingTo("1.20");
+        assertThat(row.getPurchased()).isFalse();
+        assertThat(row.getStale()).isFalse();
+    }
+
+    @Test
+    void generate_unpricedIngredient_isStillPersisted_withNullEstimatedCost() {
+        when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of(slot(1L, 1.0)));
+        when(recipeIngredientRepository.findByRecipeId(1L)).thenReturn(List.of(ing("saffron", 2.0, "g")));
+        when(inventoryRepository.findAll()).thenReturn(List.of());
+        when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of());
+        when(ingredientPriceService.estimateIngredientCost(eq("saffron"), anyDouble()))
+                .thenReturn(Optional.empty());
+        when(ingredientPriceService.estimateCost(eq("saffron"), anyDouble()))
+                .thenReturn(noCost(IngredientPriceService.PriceGap.NO_PRICE_ON_FILE));
+        when(groceryListRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
+
+        GroceryListResponse res = service.generateGroceryList(new GroceryListRequest(7L));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroceryListItem>> toSave = ArgumentCaptor.forClass(List.class);
+        verify(groceryListRepository).saveAll(toSave.capture());
+        assertThat(toSave.getValue()).hasSize(1);
+        assertThat(toSave.getValue().get(0).getItemName()).isEqualTo("saffron");
+        assertThat(toSave.getValue().get(0).getEstimatedCost()).isNull();
+        assertThat(res.costIncomplete()).isTrue();
+    }
+
+    @Test
+    void generate_nullRequest_throwsBadRequest() {
+        assertThatThrownBy(() -> service.generateGroceryList(null))
+                .isInstanceOf(BadRequestException.class);
+        verify(groceryListRepository, never()).deleteAll(anyIterable());
+        verify(groceryListRepository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void generate_nullMealPlanId_throwsBadRequest() {
+        assertThatThrownBy(() -> service.generateGroceryList(new GroceryListRequest(null)))
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void generate_planWithNoSlots_deletesAnyPreviousListAndPersistsAnEmptySet() {
+        GroceryListItem oldRow = existingRow("was-here", false);
+        when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of());
+        when(inventoryRepository.findAll()).thenReturn(List.of());
+        when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of(oldRow));
+        when(groceryListRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
+
+        GroceryListResponse res = service.generateGroceryList(new GroceryListRequest(7L));
+
+        verify(groceryListRepository).deleteAll(List.of(oldRow));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroceryListItem>> toSave = ArgumentCaptor.forClass(List.class);
+        verify(groceryListRepository).saveAll(toSave.capture());
+        assertThat(toSave.getValue()).isEmpty();
+        assertThat(res.items()).isEmpty();
+        assertThat(res.costIncomplete()).isFalse();
+        assertThat(res.missingPrices()).isEmpty();
+    }
+
+    @Test
+    void generate_isDeleteThenInsert_soPreviousPurchasedTicksAreNotCarriedOver() {
+        when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of(slot(1L, 1.0)));
+        when(recipeIngredientRepository.findByRecipeId(1L)).thenReturn(List.of(ing("flour", 100.0, "g")));
+        when(inventoryRepository.findAll()).thenReturn(List.of());
+        // a prior list where "flour" was already checked off
+        when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of(existingRow("flour", true)));
+        when(ingredientPriceService.estimateIngredientCost(eq("flour"), anyDouble()))
+                .thenReturn(Optional.of(new BigDecimal("1.00")));
+        when(groceryListRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
+
+        service.generateGroceryList(new GroceryListRequest(7L));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroceryListItem>> toSave = ArgumentCaptor.forClass(List.class);
+        verify(groceryListRepository).saveAll(toSave.capture());
+        // Documents known-issues.md "Regenerating a grocery list drops purchased ticks".
+        assertThat(toSave.getValue().get(0).getPurchased()).isFalse();
+    }
+
+    @Test
+    void generate_inventoryNamesAreNormalizedBeforeTheOnHandMatch() {
+        when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of(slot(1L, 1.0)));
+        when(recipeIngredientRepository.findByRecipeId(1L)).thenReturn(List.of(ing("flour", 100.0, "g")));
+        when(inventoryRepository.findAll()).thenReturn(List.of(inv("Flour 1kg")));
+        when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of());
+        when(groceryListRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
+
+        GroceryListResponse res = service.generateGroceryList(new GroceryListRequest(7L));
+
+        // "Flour 1kg" -> normalized "flour" -> matches the ingredient -> dropped.
+        assertThat(res.items()).isEmpty();
+    }
+
+    @Test
+    void generate_sameIngredientAcrossDifferentRecipesAndSlots_isAggregatedIntoOneRow() {
+        when(mealPlanSlotRepository.findByMealPlanId(7L)).thenReturn(List.of(slot(1L, 1.0), slot(2L, 2.0)));
+        when(recipeIngredientRepository.findByRecipeId(1L)).thenReturn(List.of(ing("onion", 50.0, "g")));
+        when(recipeIngredientRepository.findByRecipeId(2L)).thenReturn(List.of(ing("Onion", 30.0, "g")));
+        when(inventoryRepository.findAll()).thenReturn(List.of());
+        when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of());
+        when(ingredientPriceService.estimateIngredientCost(eq("onion"), anyDouble()))
+                .thenReturn(Optional.of(new BigDecimal("0.55")));
+        when(groceryListRepository.saveAll(anyList())).thenAnswer(i -> i.getArgument(0));
+
+        service.generateGroceryList(new GroceryListRequest(7L));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroceryListItem>> toSave = ArgumentCaptor.forClass(List.class);
+        verify(groceryListRepository).saveAll(toSave.capture());
+        assertThat(toSave.getValue()).hasSize(1);
+        assertThat(toSave.getValue().get(0).getItemName()).isEqualTo("onion");
+        assertThat(toSave.getValue().get(0).getQuantity()).isEqualTo(50 * 1.0 + 30 * 2.0);
+    }
+
+    @Test
+    void setPurchased_unknownItemId_throwsNotFound() {
+        when(groceryListRepository.findById(404L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.setPurchased(404L, true))
+                .isInstanceOf(NotFoundException.class);
+        verify(groceryListRepository, never()).save(any());
+    }
+
+    @Test
+    void setPurchased_persistsTheSingleItem_thenReReadsTheWholeListForThatPlan() {
+        GroceryListItem item = new GroceryListItem();
+        item.setId(99L);
+        item.setMealPlanId(7L);
+        item.setItemName("flour");
+        item.setQuantity(100.0);
+        item.setPurchased(false);
+        GroceryListItem other = new GroceryListItem();
+        other.setMealPlanId(7L);
+        other.setItemName("milk");
+        other.setEstimatedCost(new BigDecimal("1.00"));
+
+        when(groceryListRepository.findById(99L)).thenReturn(Optional.of(item));
+        when(groceryListRepository.findByMealPlanId(7L)).thenReturn(List.of(item, other));
+        when(ingredientPriceService.estimateCost(eq("flour"), anyDouble()))
+                .thenReturn(noCost(IngredientPriceService.PriceGap.NO_PRICE_ON_FILE));
+
+        GroceryListResponse res = service.setPurchased(99L, true);
+
+        assertThat(item.getPurchased()).isTrue();
+        verify(groceryListRepository).save(item);
+        assertThat(res.items()).hasSize(2);   // whole list for the plan, not just the toggled row
     }
 }

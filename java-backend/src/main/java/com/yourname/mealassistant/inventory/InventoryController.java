@@ -4,7 +4,6 @@ import java.util.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
-import com.yourname.mealassistant.common.dto.ApiResponse;
 
 @RestController
 @RequestMapping("/api/inventory")
@@ -17,14 +16,15 @@ public class InventoryController {
     }
 
     @GetMapping("")
-    public ResponseEntity<ApiResponse<List<InventoryItem>>> listAll() {
-        return ResponseEntity.ok(ApiResponse.ok(service.getAllItems()));
+    public ResponseEntity<List<InventoryItem>> listAll() {
+        return ResponseEntity.ok(service.getAllItems());
     }
+
     @PostMapping("")
-    public ResponseEntity<ApiResponse<InventoryItem>> addItem(@RequestBody ItemRequest request) {
+    public ResponseEntity<InventoryItem> addItem(@RequestBody ItemRequest request) {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(service.addItem(request.getName(), request.getQuantity())));
+                .body(service.addItem(request.getName(), request.getQuantity()));
     }
 
 }

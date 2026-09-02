@@ -6,3 +6,5 @@ pydantic==2.13.4
 numpy==2.5.2
 sentence-transformers==6.0.0
 pytest==9.1.1
+# Required by fastapi.testclient.TestClient — see tests/test_recommendations_endpoint.py.
+httpx==0.28.1

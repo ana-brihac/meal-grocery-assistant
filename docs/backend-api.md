@@ -5,42 +5,45 @@ package layout and `docs/database.md` for persistence.
 
 ## Endpoints
 
+Every endpoint returns its DTO **raw** (no wrapper). Errors are RFC 9457 `ProblemDetail`
+(`application/problem+json`) — see [Error handling](#error-handling).
+
 | Endpoint | Method | Body / params | Returns |
 |---|---|---|---|
-| `/api/receipts/upload` | POST | multipart `file` | `ApiResponse<String>` — immediately, before OCR finishes (see below) |
-| `/api/inventory` | GET | — | `ApiResponse<List<InventoryItem>>` |
-| `/api/inventory` | POST | `{name, quantity}` (`ItemRequest`) | `201`, `ApiResponse<InventoryItem>` |
+| `/api/receipts/upload` | POST | multipart `file` | `202`, `String` message — returns before OCR runs (see below); an unreadable file is `400` |
+| `/api/inventory` | GET | — | `List<InventoryItem>` |
+| `/api/inventory` | POST | `{name, quantity}` (`ItemRequest`) | `201`, `InventoryItem` |
 | `/api/nutrition/log` | POST | `{userId, itemName, quantityGrams}` (`LogMealRequest`) | `201`, empty body |
 | `/api/nutrition/log-recipe` | POST | `{recipeId, servings}` (`LogRecipeRequest`) | `201`, empty body — writes one `nutrition_log` row per recipe ingredient, no `userId` (see `NutritionService.logRecipe`) |
-| `/api/nutrition/summary` | GET | `userId`, `from`, `to` (ISO-8601 datetimes, e.g. `2026-08-01T00:00:00`) | `NutritionSummaryResponse` (raw, not wrapped) |
-| `/api/nutrition/calendar` | GET | `start`, `end` (ISO-8601 dates, e.g. `2026-08-01`) — no `userId` | `ApiResponse<List<DailyNutritionSummary>>` — one entry per calendar day in range, zero-log days included as zero-totals |
-| `/api/spending/summary` | GET | `userId`, `from`, `to` (ISO-8601 dates, e.g. `2026-08-01`) | `SpendingSummaryResponse` (raw, not wrapped) |
+| `/api/nutrition/summary` | GET | `userId`, `from`, `to` (ISO-8601 datetimes, e.g. `2026-08-01T00:00:00`) | `NutritionSummaryResponse` |
+| `/api/nutrition/calendar` | GET | `start`, `end` (ISO-8601 dates, e.g. `2026-08-01`) — no `userId` | `List<DailyNutritionSummary>` — one entry per calendar day in range, zero-log days included as zero-totals |
+| `/api/spending/summary` | GET | `userId`, `from`, `to` (ISO-8601 dates, e.g. `2026-08-01`) | `SpendingSummaryResponse` |
 | `/api/dashboard/summary` | GET | `userId`, `from`, `to` (ISO-8601 dates) | `{nutrition: NutritionSummaryResponse, spending: SpendingSummaryResponse}` |
-| `/api/preferences` | GET | — | `ApiResponse<UserPreference>` — falls back to defaults (2000 cal / 100g protein / 30g fiber / 100 budget / batch size 1) if no row exists yet |
-| `/api/preferences` | PUT | `UserPreference` body (incl. `mealPrepBatchSize`) | `ApiResponse<UserPreference>` — upserts the single row (always `id=1`, see `docs/database.md`); a PUT that omits `mealPrepBatchSize` keeps the stored value |
-| `/api/recipes/search` | GET | `ingredients` (repeated, e.g. `?ingredients=egg&ingredients=milk`) — no `userId`; optional `rankBy=mealHistory` | `ApiResponse<RecipeSearchResponse>` — only recipes whose *entire* ingredient list is covered by `ingredients` (not "any overlap"). Ordered fewest-ingredients-first by default; `rankBy=mealHistory` re-ranks by meal-history embedding similarity via `ml-service` (see below) |
-| `/api/recipes` | GET | — | `ApiResponse<List<RecipeDetailResponse>>` — every recipe with its ingredients |
-| `/api/recipes` | POST | `{name, instructions, source, ingredients:[{ingredientName, quantity, unit}]}` (`RecipeUpsertRequest`; `quantity` in grams) | `201`, `ApiResponse<RecipeDetailResponse>` |
-| `/api/recipes/{id}` | GET | — | `ApiResponse<RecipeDetailResponse>` |
-| `/api/recipes/{id}` | PUT | `RecipeUpsertRequest` | `ApiResponse<RecipeDetailResponse>` — the ingredient list **replaces** the recipe's existing ingredients wholesale. No `DELETE` endpoint (see `docs/known-issues.md`) |
-| `/api/prices` | GET | — | `ApiResponse<List<IngredientPrice>>` |
-| `/api/prices` | POST | `{itemName, price, pricingMode ("PER_ITEM"\|"PER_KG"), gramsPerItem?}` (`AddPriceRequest`) | `201`, `ApiResponse<IngredientPrice>` |
-| `/api/prices/from-photo` | POST | multipart `file` (a shelf price tag) | `ApiResponse<PriceTagPhotoResponse>` — synchronous: OCRs the tag, upserts the price, returns what it stored (`saved: true`) + the raw OCR text |
-| `/api/mealplan/generate` | POST | `{weekStartDate (ISO date), days?, mealTypes?, servingsPerMeal?}` (`MealPlanRequest`) | `ApiResponse<MealPlanResponse>` — a persisted plan: slots with per-recipe contributions, totals vs. snapshot targets, `costIncomplete` / `nutritionIncomplete`, `warnings` |
-| `/api/mealplan` | GET | — | `ApiResponse<List<MealPlanResponse>>` — plan history, newest first |
-| `/api/mealplan/{id}` | GET | — | `ApiResponse<MealPlanResponse>` |
-| `/api/mealplan/{id}/slots/{slotId}/replace` | POST | optional `{excludeRecipeIds?}` (`SlotReplacementRequest`) | `ApiResponse<MealPlanResponse>` — swaps one slot for a fitting alternative; marks any grocery list for the plan stale |
-| `/api/mealplan/{id}/select` | POST | `{weekStartDate}` (`SelectPlanRequest`) | `ApiResponse<MealPlanResponse>` — clones this plan into a new `SELECTED` plan for that week, re-checked against current targets |
-| `/api/grocerylist/generate` | POST | `{mealPlanId}` (`GroceryListRequest`) | `ApiResponse<GroceryListResponse>` — aggregates the plan's ingredients minus inventory, prices the rest; regenerating replaces the previous list. `missingPrices: [{ingredientName, reason}]` names every ingredient that couldn't be priced (`reason` = `NO_PRICE_ON_FILE` or `NEEDS_GRAMS_PER_ITEM`) so the client can prompt the user to add it via `POST /api/prices` |
-| `/api/grocerylist/{mealPlanId}` | GET | — | `ApiResponse<GroceryListResponse>` — `stale: true` if a slot was swapped since it was generated; `missingPrices` is recomputed each call, so it shrinks as prices are added |
-| `/api/grocerylist/items/{itemId}` | PATCH | `?purchased=true\|false` | `ApiResponse<GroceryListResponse>` — the refreshed list |
+| `/api/preferences` | GET | — | `UserPreference` — falls back to defaults (2000 cal / 100g protein / 30g fiber / 100 budget / batch size 1) if no row exists yet |
+| `/api/preferences` | PUT | `UserPreference` body (incl. `mealPrepBatchSize`) | `UserPreference` — upserts the single row (always `id=1`, see `docs/database.md`); a PUT that omits `mealPrepBatchSize` keeps the stored value |
+| `/api/recipes/search` | GET | `ingredients` (repeated, e.g. `?ingredients=egg&ingredients=milk`) — no `userId`; optional `rankBy=mealHistory` | `RecipeSearchResponse` — only recipes whose *entire* ingredient list is covered by `ingredients` (not "any overlap"). Ordered fewest-ingredients-first by default; `rankBy=mealHistory` re-ranks by meal-history embedding similarity via `ml-service` (see below) |
+| `/api/recipes` | GET | — | `List<RecipeDetailResponse>` — every recipe with its ingredients |
+| `/api/recipes` | POST | `{name, instructions, source, ingredients:[{ingredientName, quantity, unit}]}` (`RecipeUpsertRequest`; `quantity` in grams) | `201`, `RecipeDetailResponse` |
+| `/api/recipes/{id}` | GET | — | `RecipeDetailResponse` |
+| `/api/recipes/{id}` | PUT | `RecipeUpsertRequest` | `RecipeDetailResponse` — the ingredient list **replaces** the recipe's existing ingredients wholesale. No `DELETE` endpoint (see `docs/known-issues.md`) |
+| `/api/prices` | GET | — | `List<IngredientPrice>` |
+| `/api/prices` | POST | `{itemName, price, pricingMode ("PER_ITEM"\|"PER_KG"), gramsPerItem?}` (`AddPriceRequest`) | `201`, `IngredientPrice` |
+| `/api/prices/from-photo` | POST | multipart `file` (a shelf price tag) | `PriceTagPhotoResponse` — synchronous: OCRs the tag, upserts the price, returns what it stored (`saved: true`) + the raw OCR text; an unreadable file is `400` |
+| `/api/mealplan/generate` | POST | `{weekStartDate (ISO date), days?, mealTypes?, servingsPerMeal?}` (`MealPlanRequest`) | `201`, `MealPlanResponse` — a persisted plan: slots with per-recipe contributions, totals vs. snapshot targets, `costIncomplete` / `nutritionIncomplete`, `warnings` |
+| `/api/mealplan` | GET | — | `List<MealPlanResponse>` — plan history, newest first |
+| `/api/mealplan/{id}` | GET | — | `MealPlanResponse` |
+| `/api/mealplan/{id}/slots/{slotId}/replace` | POST | optional `{excludeRecipeIds?}` (`SlotReplacementRequest`) | `MealPlanResponse` — swaps one slot for a fitting alternative; marks any grocery list for the plan stale |
+| `/api/mealplan/{id}/select` | POST | `{weekStartDate}` (`SelectPlanRequest`) | `MealPlanResponse` — clones this plan into a new `SELECTED` plan for that week, re-checked against current targets |
+| `/api/grocerylist/generate` | POST | `{mealPlanId}` (`GroceryListRequest`) | `201`, `GroceryListResponse` — aggregates the plan's ingredients minus inventory, prices the rest; regenerating replaces the previous list. `missingPrices: [{ingredientName, reason}]` names every ingredient that couldn't be priced (`reason` = `NO_PRICE_ON_FILE` or `NEEDS_GRAMS_PER_ITEM`) so the client can prompt the user to add it via `POST /api/prices` |
+| `/api/grocerylist/{mealPlanId}` | GET | — | `GroceryListResponse` — `stale: true` if a slot was swapped since it was generated; `missingPrices` is recomputed each call, so it shrinks as prices are added |
+| `/api/grocerylist/items/{itemId}` | PATCH | `?purchased=true\|false` | `GroceryListResponse` — the refreshed list |
 
-Note the inconsistency: receipts/inventory/preferences responses are wrapped in
-`ApiResponse<T> {success, data, error}`; nutrition/spending/dashboard return raw DTOs directly.
-`NutritionController` itself is now split down the middle — `/summary` and `/log` are raw,
-`/calendar` is wrapped — since `/calendar` was added after `preference` established the
-`ApiResponse` pattern for new endpoints. There still isn't a project-wide convention — match
-whatever the specific endpoint you're touching already does.
+**Response shape.** All success responses are the raw DTO — the old `ApiResponse<T>
+{success, data, error}` envelope has been removed (`ApiResponse.java` is gone), along with
+`NutritionController#/calendar`'s wrapper. `/api/receipts/upload` (was `200` +
+`ApiResponse<String>`) is now `202` + a plain `String`; `/api/mealplan/generate` and
+`/api/grocerylist/generate` (were `200`) are now `201`. Clients read the body directly and
+branch on the HTTP status.
 
 `/api/nutrition/calendar` also doesn't take a `userId`, unlike every other nutrition/spending
 endpoint — `NutritionService.getDailyBreakdown` queries all `nutrition_log` rows in the date range
@@ -66,16 +69,23 @@ itself is not exposed in the response — only the order changes. See `docs/ml-s
 
 ## Error handling
 
-`GlobalExceptionHandler` (`common/exception`) is a `@RestControllerAdvice` with two handlers:
+`GlobalExceptionHandler` (`common/exception`) is a `@RestControllerAdvice`. Every error is an
+RFC 9457 `ProblemDetail` (`{type, title, status, detail}`, `Content-Type:
+application/problem+json`) with the raw exception message in `detail`. Four handlers:
 
-- `NutritionApiException` (thrown by `NutritionApiClient` on a USDA 5xx or 429) → `502 Bad Gateway`,
-  `ApiResponse.fail(message)`
-- Everything else (`Exception.class`) → `500`, `ApiResponse.fail(message)`
+- `NotFoundException` — a referenced plan / recipe / slot / grocery-list item doesn't exist
+  (thrown from the services' `orElseThrow(...)` sites) → `404 Not Found`
+- `BadRequestException` — an unreadable multipart upload, a missing `mealPlanId` / `weekStartDate`,
+  an invalid `pricingMode` → `400 Bad Request`
+- `NutritionApiException` (thrown by `NutritionApiClient` on a USDA 5xx or 429) → `502 Bad Gateway`
+- Everything else (`Exception.class`) → `500`
 
-So even unexpected failures come back as structured JSON, not a raw stack trace — but note this
-means **all** unhandled exceptions anywhere in the app currently surface as 500 with the raw
-`e.getMessage()`, which could leak internal detail. There's no logging in the handler itself either
-— check the application console/log for the actual stack trace, the HTTP response won't have it.
+A bare `IllegalArgumentException` (e.g. from a library) is deliberately NOT remapped — it hits
+the `500` catch-all so a genuine internal bug isn't disguised as a client error. Caveats that
+carried over: the catch-all puts `e.getMessage()` verbatim into `detail`, which could leak
+internal detail; there's no logging in the handler — check the application console for the
+stack trace. `ApiErrorMappingTest` (`@WebMvcTest`) asserts the actual status codes + the
+`application/problem+json` body.
 
 ## Receipt upload flow (async, fire-and-forget)
 
@@ -91,10 +101,12 @@ means **all** unhandled exceptions anywhere in the app currently surface as 500 
 4. For each parsed line with a usable price, `IngredientPriceService.upsertFromReceipt(name, price)`
    — best-effort, per-item failures swallowed like the rest of the chain.
 
-**The HTTP response returns immediately** ("Receipt uploaded and processing in background") before
-any of this runs — there is no status endpoint, webhook, or polling mechanism to find out whether
-OCR/parsing actually succeeded. Failures anywhere in the chain are caught by `.exceptionally(...)`
-and only printed to stderr; the client has no way to know. See `docs/known-issues.md`.
+**The HTTP response returns `202 Accepted` immediately** ("Receipt uploaded and processing in
+background") before any of this runs — there is no status endpoint, webhook, or polling
+mechanism to find out whether OCR/parsing actually succeeded. Failures anywhere in the chain are
+caught by `.exceptionally(...)` and only printed to stderr; the client has no way to know. The
+one synchronous failure that *is* surfaced: if `file.getBytes()` throws (unreadable upload), the
+controller returns `400` before the hand-off. See `docs/known-issues.md`.
 
 ## Nutrition lookup + caching
 

@@ -3,6 +3,7 @@ package com.yourname.mealassistant.pricing;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yourname.mealassistant.common.client.OcrClient;
+import com.yourname.mealassistant.common.exception.BadRequestException;
 import com.yourname.mealassistant.common.util.ItemNameNormalizer;
 import com.yourname.mealassistant.pricing.dto.AddPriceRequest;
 import com.yourname.mealassistant.pricing.dto.PriceTagPhotoResponse;
@@ -178,7 +179,7 @@ public class IngredientPriceService {
         if (v.equals(IngredientPrice.MODE_PER_ITEM) || v.equals(IngredientPrice.MODE_PER_KG)) {
             return v;
         }
-        throw new IllegalArgumentException("pricingMode must be PER_ITEM or PER_KG, got: " + raw);
+        throw new BadRequestException("pricingMode must be PER_ITEM or PER_KG, got: " + raw);
     }
 
     private ParsedTag parseTag(String rawOcrText) {

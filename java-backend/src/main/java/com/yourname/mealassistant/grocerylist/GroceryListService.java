@@ -1,6 +1,8 @@
 package com.yourname.mealassistant.grocerylist;
 
 import com.yourname.mealassistant.common.dto.MissingIngredientPrice;
+import com.yourname.mealassistant.common.exception.BadRequestException;
+import com.yourname.mealassistant.common.exception.NotFoundException;
 import com.yourname.mealassistant.common.util.ItemNameNormalizer;
 import com.yourname.mealassistant.grocerylist.dto.GroceryListRequest;
 import com.yourname.mealassistant.grocerylist.dto.GroceryListResponse;
@@ -61,7 +63,7 @@ public class GroceryListService {
 
     public GroceryListResponse generateGroceryList(GroceryListRequest request) {
         if (request == null || request.mealPlanId() == null) {
-            throw new IllegalArgumentException("mealPlanId is required");
+            throw new BadRequestException("mealPlanId is required");
         }
         Long mealPlanId = request.mealPlanId();
         List<MealPlanSlot> slots = mealPlanSlotRepository.findByMealPlanId(mealPlanId);
@@ -114,7 +116,7 @@ public class GroceryListService {
 
     public GroceryListResponse setPurchased(Long itemId, boolean purchased) {
         GroceryListItem item = groceryListRepository.findById(itemId)
-                .orElseThrow(() -> new IllegalArgumentException("Grocery list item not found: " + itemId));
+                .orElseThrow(() -> new NotFoundException("Grocery list item not found: " + itemId));
         item.setPurchased(purchased);
         groceryListRepository.save(item);
         return toResponse(item.getMealPlanId(), groceryListRepository.findByMealPlanId(item.getMealPlanId()));

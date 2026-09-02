@@ -1,6 +1,5 @@
 package com.yourname.mealassistant.preference;
 
-import com.yourname.mealassistant.common.dto.ApiResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,12 +14,12 @@ public class UserPreferenceController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponse<UserPreference>> getPreferences() {
-        return ResponseEntity.ok(ApiResponse.ok(service.getPreferences()));
+    public ResponseEntity<UserPreference> getPreferences() {
+        return ResponseEntity.ok(service.getPreferences());
     }
 
     @PutMapping
-    public ResponseEntity<ApiResponse<UserPreference>> updatePreferences(@RequestBody UserPreference preferences) {
-        return ResponseEntity.ok(ApiResponse.ok(service.savePreferences(preferences)));
+    public ResponseEntity<UserPreference> updatePreferences(@RequestBody UserPreference preferences) {
+        return ResponseEntity.ok(service.savePreferences(preferences));
     }
 }

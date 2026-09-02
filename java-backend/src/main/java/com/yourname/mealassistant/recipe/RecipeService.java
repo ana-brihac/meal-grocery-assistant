@@ -3,6 +3,7 @@ package com.yourname.mealassistant.recipe;
 import com.yourname.mealassistant.recipe.dto.RecipeDetailResponse;
 import com.yourname.mealassistant.recipe.dto.RecipeSearchRequest;
 import com.yourname.mealassistant.recipe.dto.RecipeSearchResponse;
+import com.yourname.mealassistant.common.exception.NotFoundException;
 import com.yourname.mealassistant.recipe.dto.RecipeUpsertRequest;
 import com.yourname.mealassistant.recipe.ranking.RecipeRankingService;
 import org.springframework.stereotype.Service;
@@ -61,7 +62,7 @@ public class RecipeService {
 
     public RecipeDetailResponse getRecipe(Long id) {
         Recipe recipe = recipeRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Recipe not found: " + id));
+                .orElseThrow(() -> new NotFoundException("Recipe not found: " + id));
         return toDetail(recipe);
     }
 
@@ -81,7 +82,7 @@ public class RecipeService {
     // only affects plans generated afterwards.
     public RecipeDetailResponse updateRecipe(Long id, RecipeUpsertRequest request) {
         Recipe recipe = recipeRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Recipe not found: " + id));
+                .orElseThrow(() -> new NotFoundException("Recipe not found: " + id));
         recipe.setName(request.name());
         recipe.setInstructions(request.instructions());
         recipe.setSource(request.source());

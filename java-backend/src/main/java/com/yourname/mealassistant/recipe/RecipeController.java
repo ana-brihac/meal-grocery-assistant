@@ -1,6 +1,5 @@
 package com.yourname.mealassistant.recipe;
 
-import com.yourname.mealassistant.common.dto.ApiResponse;
 import com.yourname.mealassistant.recipe.dto.RecipeDetailResponse;
 import com.yourname.mealassistant.recipe.dto.RecipeSearchRequest;
 import com.yourname.mealassistant.recipe.dto.RecipeSearchResponse;
@@ -28,34 +27,34 @@ public class RecipeController {
     // default fewest-ingredients rule; omitted/anything else keeps the default. See
     // RecipeService.searchRecipes for the fallback behavior if ml-service is down.
     @GetMapping("/search")
-    public ResponseEntity<ApiResponse<RecipeSearchResponse>> search(
+    public ResponseEntity<RecipeSearchResponse> search(
             @RequestParam List<String> ingredients,
             @RequestParam(required = false) String rankBy) {
         RecipeSearchRequest request = new RecipeSearchRequest(ingredients, rankBy);
-        return ResponseEntity.ok(ApiResponse.ok(service.searchRecipes(request)));
+        return ResponseEntity.ok(service.searchRecipes(request));
     }
 
     // --- recipe management: add / edit recipes from the app ---
 
     @GetMapping("")
-    public ResponseEntity<ApiResponse<List<RecipeDetailResponse>>> list() {
-        return ResponseEntity.ok(ApiResponse.ok(service.listRecipes()));
+    public ResponseEntity<List<RecipeDetailResponse>> list() {
+        return ResponseEntity.ok(service.listRecipes());
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<RecipeDetailResponse>> get(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.ok(service.getRecipe(id)));
+    public ResponseEntity<RecipeDetailResponse> get(@PathVariable Long id) {
+        return ResponseEntity.ok(service.getRecipe(id));
     }
 
     @PostMapping("")
-    public ResponseEntity<ApiResponse<RecipeDetailResponse>> create(@RequestBody RecipeUpsertRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(service.createRecipe(request)));
+    public ResponseEntity<RecipeDetailResponse> create(@RequestBody RecipeUpsertRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.createRecipe(request));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<ApiResponse<RecipeDetailResponse>> update(@PathVariable Long id,
-                                                                    @RequestBody RecipeUpsertRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(service.updateRecipe(id, request)));
+    public ResponseEntity<RecipeDetailResponse> update(@PathVariable Long id,
+                                                       @RequestBody RecipeUpsertRequest request) {
+        return ResponseEntity.ok(service.updateRecipe(id, request));
     }
 
     // Decided: no DELETE endpoint. A recipe is referenced by meal_plan_slot,
