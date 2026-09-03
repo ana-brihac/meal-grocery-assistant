@@ -108,10 +108,22 @@ recommendation service.
 | [`docs/known-issues.md`](docs/known-issues.md) | Open issues, recently-fixed bugs worth knowing about, TODOs |
 | [`docs/ml-service.md`](docs/ml-service.md) | The Python `ml-service` — the recommendation endpoint, how it's called, how to run it |
 
+## Recent changes (2026-09-01)
+
+- **Uniform response shape.** Controllers now return raw DTOs — the old `ApiResponse<T>
+  {success, data, error}` envelope is gone. Errors are RFC 9457 `ProblemDetail`
+  (`application/problem+json`) from `GlobalExceptionHandler`: `NotFoundException` → 404,
+  `BadRequestException` → 400, `NutritionApiException` → 502, else → 500. `POST
+  /api/receipts/upload` is now `202`; `POST /api/mealplan/generate` and
+  `POST /api/grocerylist/generate` are `201`. See [`docs/backend-api.md`](docs/backend-api.md).
+- **Test coverage + CI.** `mvn test` is 195 tests (services, every controller, a `@WebMvcTest`
+  for error mapping), `pytest` is 16 (incl. a `TestClient` test of `POST /recommendations`).
+  [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs both on every PR and on pushes to
+  `main` / `ana-brihac/**`.
+
 ## If you only read one more thing
 
 [`docs/known-issues.md`](docs/known-issues.md) — it lists what's actually rough or unfinished right
-now (empty test files masquerading as coverage, an unwired `AsyncConfig`, an uncontainerized
-`ml-service`, silent failure paths in receipt upload, the meal-plan optimizer's untuned scoring
-weights, name-match-only inventory subtraction) so you don't have to rediscover any of it the hard
-way.
+now (an unwired `AsyncConfig`, an uncontainerized `ml-service`, silent failure paths in receipt
+upload, the meal-plan optimizer's untuned scoring weights, name-match-only inventory subtraction)
+so you don't have to rediscover any of it the hard way.
