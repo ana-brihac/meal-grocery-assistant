@@ -35,11 +35,16 @@ On top of that:
   grocery lists. Runs on `:8080`.
 - **`ml-service/`** — Python/FastAPI. Hosts one real feature: `POST /recommendations`, which embeds
   candidate recipes and meal history with sentence-transformers (`all-MiniLM-L6-v2`) and ranks
-  candidates by cosine similarity. Still has the legacy `/ping` route. Not containerized (empty
-  `Dockerfile`, no `docker-compose` service) — run it directly with `uvicorn`. See
-  [`docs/ml-service.md`](docs/ml-service.md).
+  candidates by cosine similarity. Still has the legacy `/ping` route. Containerized — `ml-service/Dockerfile`
+  bakes the model into the image and preloads it at startup; it comes up with the rest of the stack
+  via `docker compose`. See [`docs/ml-service.md`](docs/ml-service.md).
 - **Postgres 16** — schema is hand-written SQL under `db/init/`, no migration tool. Runs on
-  `:5432` via `docker-compose up -d postgres`.
+  `:5432`.
+
+All three services run together with `docker compose up --build` (Postgres + `ml-service` +
+`java-backend`, health-gated startup, API keys from a repo-root `.env`). Running the backend
+directly with `mvn spring-boot:run` against `docker compose up -d postgres` is still fine for
+iterating on Java. Full VM deployment (nginx + HTTPS): [`docs/deployment.md`](docs/deployment.md).
 
 ```
 receipt image → java-backend → Gemini (OCR) → inventory_items + ingredient_price
@@ -57,12 +62,21 @@ Full detail: [`docs/architecture.md`](docs/architecture.md).
 
 ## Getting started
 
+Whole stack in containers:
+
 ```
-# create .env in the repo root with USDA_API_KEY and OCR_API_KEY (see docs/setup.md)
-docker-compose up -d postgres
+# create .env in the repo root with USDA_API_KEY and OCR_API_KEY (see .env.example / docs/setup.md)
+docker compose up --build            # Postgres + ml-service + java-backend, :8080
+```
+
+Or run just the backend against a containerized Postgres (handy while editing Java):
+
+```
+docker compose up -d postgres
 cd java-backend
 export USDA_API_KEY=...     # mvn spring-boot:run doesn't read .env automatically
 export OCR_API_KEY=...
+export ML_SERVICE_BASE_URL=http://localhost:8000   # only if you also run ml-service locally
 mvn spring-boot:run
 ```
 
@@ -84,9 +98,10 @@ for the column format) before starting the backend, then:
 curl "http://localhost:8080/api/recipes/search?ingredients=<name>&ingredients=<name>"
 ```
 
-Add `&rankBy=mealHistory` to re-rank by meal-history similarity — this needs `ml-service` running
-(`cd ml-service && uvicorn app.main:app --port 8000`, after `pip install -r requirements.txt` into
-a venv); if it's down the search still succeeds, just with the default ordering.
+Add `&rankBy=mealHistory` to re-rank by meal-history similarity — this needs `ml-service` running.
+It comes up automatically with `docker compose up`; to run it standalone,
+`cd ml-service && uvicorn app.main:app --port 8000` after `pip install -r requirements.txt` into a
+venv. If it's down the search still succeeds, just with the default ordering.
 
 To try meal planning: seed a few prices (`POST /api/prices` or a receipt upload), then
 `POST /api/mealplan/generate` with `{"weekStartDate":"2026-09-01"}`, then
@@ -108,6 +123,24 @@ recommendation service.
 | [`docs/known-issues.md`](docs/known-issues.md) | Open issues, recently-fixed bugs worth knowing about, TODOs |
 | [`docs/ml-service.md`](docs/ml-service.md) | The Python `ml-service` — the recommendation endpoint, how it's called, how to run it |
 
+## Recent changes (2026-09-08)
+
+- **Full stack is containerized.** `docker compose up --build` brings up Postgres, `ml-service`,
+  and `java-backend` together — health-gated startup (`java-backend` waits for Postgres's
+  `pg_isready`), API keys substituted from a repo-root `.env` (see `.env.example`), `db/init/`
+  mount and `pantry_pg_data` volume unchanged. `java-backend/Dockerfile` is a multi-stage Maven →
+  slim-JRE build; `ml-service/Dockerfile` bakes `all-MiniLM-L6-v2` into the image and preloads it
+  at startup. `java-backend` is published on `127.0.0.1:8080` (reach it through a reverse proxy on
+  a server — see [`docs/deployment.md`](docs/deployment.md), a full Oracle Cloud VM + nginx +
+  Let's Encrypt guide).
+- **`rankBy=mealHistory` actually uses the ML signal now.** Two latent bugs made it silently fall
+  back to the default ordering whenever any meal history existed: `MlServiceClient` serialized
+  `logged_at` as a numeric array (Pydantic rejected it 422), and the first post-restart call
+  cold-loaded the model past the 5s client timeout. Fixed (ISO-8601 serialization + startup model
+  preload). New `db/init/008_users_seed.sql` seeds the default `users` id 1 row so
+  `POST /api/nutrition/log {"userId":1}` works on a fresh volume.
+- **`mvn test` is now 196** (added `MlServiceClientTest` request-body coverage); `pytest` still 16.
+
 ## Recent changes (2026-09-01)
 
 - **Uniform response shape.** Controllers now return raw DTOs — the old `ApiResponse<T>
@@ -116,14 +149,14 @@ recommendation service.
   `BadRequestException` → 400, `NutritionApiException` → 502, else → 500. `POST
   /api/receipts/upload` is now `202`; `POST /api/mealplan/generate` and
   `POST /api/grocerylist/generate` are `201`. See [`docs/backend-api.md`](docs/backend-api.md).
-- **Test coverage + CI.** `mvn test` is 195 tests (services, every controller, a `@WebMvcTest`
-  for error mapping), `pytest` is 16 (incl. a `TestClient` test of `POST /recommendations`).
+- **Test coverage + CI.** `mvn test` covers services, every controller, and a `@WebMvcTest`
+  for error mapping; `pytest` is 16 (incl. a `TestClient` test of `POST /recommendations`).
   [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs both on every PR and on pushes to
   `main` / `ana-brihac/**`.
 
 ## If you only read one more thing
 
 [`docs/known-issues.md`](docs/known-issues.md) — it lists what's actually rough or unfinished right
-now (an unwired `AsyncConfig`, an uncontainerized `ml-service`, silent failure paths in receipt
-upload, the meal-plan optimizer's untuned scoring weights, name-match-only inventory subtraction)
-so you don't have to rediscover any of it the hard way.
+now (an unwired `AsyncConfig`, silent failure paths in receipt upload, the meal-plan optimizer's
+untuned scoring weights, name-match-only inventory subtraction) so you don't have to rediscover any
+of it the hard way.

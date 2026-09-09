@@ -9,7 +9,7 @@ mvn test
 
 All tests are JUnit 5 + Mockito with no Spring context (fast, no Postgres needed) — except
 `ApiErrorMappingTest`, a single `@WebMvcTest` slice that verifies the real HTTP error status
-codes. `mvn test` runs 195 tests.
+codes. `mvn test` runs 196 tests.
 
 **What's actually covered:**
 
@@ -28,10 +28,12 @@ codes. `mvn test` runs 195 tests.
   `updateRecipe` replaces the ingredient list wholesale, unknown id throws.
 - `RecipeRankingServiceTest` (2 tests) — fewest-ingredients-first ordering, empty candidates list.
   (`rankByMealHistorySimilarity` is exercised via `RecipeServiceTest` and `MlServiceClientTest`.)
-- `MlServiceClientTest` (2 tests) — spins up a real `com.sun.net.httpserver.HttpServer` on a random
+- `MlServiceClientTest` (3 tests) — spins up a real `com.sun.net.httpserver.HttpServer` on a random
   port (no wiremock/mockwebserver dependency): one asserts a real `POST /recommendations`
-  round-trip serializes the request and parses `{"results":[...]}`; the other asserts the 5-second
-  timeout fires when the server hangs (so this class takes ~5s to run).
+  round-trip serializes the request and parses `{"results":[...]}`; one captures the request body
+  and asserts `logged_at` is an ISO-8601 string, not the numeric array a plain `WebClient` would
+  emit (which `ml-service` rejects `422`); the last asserts the 5-second timeout fires when the
+  server hangs (so this class takes ~5s to run).
 - `MealPlanOptimizerTest` (8 tests) — pure, no Spring. Every slot filled with distinct recipes and
   no warnings when a day is in band; weekly-budget cutoff skips an unaffordable recipe; a day that
   can't reach the calorie band comes back with a warning; empty candidates → empty plan + warnings;
@@ -54,7 +56,7 @@ codes. `mvn test` runs 195 tests.
   inventory covering everything returns an empty list; `setPurchased` toggles the flag and returns
   the refreshed list; `getGroceryList` reports `stale` when any row is stale.
 
-**Added in the testing-coverage pass** (`mvn test` is now 195 tests):
+**Added in the testing-coverage pass** (`mvn test` is now 196 tests):
 
 - `InventoryServiceTest`, `ReceiptParserTest` — were genuinely empty, now real. `ReceiptParserTest`
   leans on malformed / unexpected Gemini output (not-JSON, truncated, `null` literal,
@@ -138,7 +140,7 @@ Postgres). To verify the nutrition/spending stack actually works end-to-end, sta
 
 6. **Check Postgres directly**:
    ```
-   docker exec -it <postgres-container> psql -U postgres -d pantrydb -c 'select * from nutrition_info;'
+   docker compose exec postgres psql -U postgres -d pantrydb -c 'select * from nutrition_info;'
    ```
    to confirm real persistence, not just 200-status theater.
 
@@ -208,8 +210,10 @@ mean anything.
 
 ## Recipe recommendations
 
-Needs `ml-service` running (`cd ml-service && uvicorn app.main:app --port 8000`) in addition to the
-backend, plus some `nutrition_log` history to rank against (log a few meals first).
+Needs `ml-service` running — it comes up with `docker compose up`, or run it standalone with
+`cd ml-service && uvicorn app.main:app --port 8000` — plus some `nutrition_log` history to rank
+against (log a few meals first; on a fresh DB the `users` id 1 row from `db/init/008` must exist for
+`POST /api/nutrition/log`).
 
 1. **Default ranking** — `GET /api/recipes/search?ingredients=...` with no `rankBy` returns
    fewest-ingredients-first.
@@ -218,9 +222,10 @@ backend, plus some `nutrition_log` history to rank against (log a few meals firs
    in `nutrition_log` should rise to the top. The response shape is identical (no score field is
    exposed) — only the order changes.
 
-3. **Fallback when `ml-service` is down** — stop `uvicorn`, repeat the `rankBy=mealHistory` request.
-   It should still return `200` with results in the default fewest-ingredients order (within ~5s —
-   the `MlServiceClient` timeout), **not** a 502 or a hang.
+3. **Fallback when `ml-service` is down** — stop `ml-service` (`docker compose stop ml-service`, or
+   kill `uvicorn`), repeat the `rankBy=mealHistory` request. It should still return `200` with
+   results in the default fewest-ingredients order (within ~5s — the `MlServiceClient` timeout),
+   **not** a 502 or a hang.
 
 4. **Hit `ml-service` directly** — see `docs/ml-service.md` for a `POST /recommendations` curl and
    the expected ranked-list response.

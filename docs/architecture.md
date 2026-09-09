@@ -32,10 +32,14 @@ searches/edits recipes, and generates weekly meal plans that respect the user's 
 - **ml-service** — FastAPI, Python. Hosts `POST /recommendations`: it embeds candidate recipes and
   meal history with sentence-transformers (`all-MiniLM-L6-v2`) and returns candidates ranked by
   cosine similarity. No DB of its own — everything it needs is in the request body. Still serves
-  the legacy `/ping`. Not containerized (empty `Dockerfile`, no compose service). See
-  `docs/ml-service.md`.
+  the legacy `/ping`. Containerized (`ml-service/Dockerfile` bakes the model in and preloads it at
+  startup); comes up with the rest of the stack via `docker compose`. See `docs/ml-service.md`.
 - **Postgres** — schema is hand-written SQL in `db/init/`, applied only on first container start
   (no Flyway/Liquibase). See `docs/database.md`.
+
+All three run together with `docker compose up --build` (see `docs/setup.md`); `java-backend`
+publishes on `127.0.0.1:8080`. `docs/deployment.md` covers running this on a VM behind an nginx +
+Let's Encrypt reverse proxy.
 
 ## Package layout (`java-backend/src/main/java/com/yourname/mealassistant`)
 
