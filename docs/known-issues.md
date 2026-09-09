@@ -1,5 +1,48 @@
 # Known issues / TODOs
 
+## Recently fixed (2026-09-03)
+
+- **Full stack is containerized.** `ml-service/Dockerfile` and `java-backend/Dockerfile` are real
+  multi-stage builds, and `docker-compose.yml` now brings up all three services (`postgres`,
+  `ml-service`, `java-backend`) with healthchecks and ordered startup (`java-backend` waits for
+  `postgres` to pass `pg_isready`; it only waits for `ml-service` to *start*, since the ML ranking
+  degrades gracefully). `USDA_API_KEY` / `OCR_API_KEY` come from a repo-root `.env`
+  (`docker compose` substitutes them automatically; `.env.example` documents the shape). The
+  `db/init/` mount and `pantry_pg_data` volume are unchanged. Verified by building the images and
+  running the stack against real Postgres: `GET`/`POST /api/inventory` round-trip to Postgres, and
+  `java-backend` reaches `ml-service` by service name (`POST /recommendations` returns 200 over the
+  compose network). VM/reverse-proxy/HTTPS guide: `docs/deployment.md`.
+- **`ml-service` image bakes the embedding model, and preloads it at startup.** `all-MiniLM-L6-v2`
+  (~80 MB) is downloaded during `docker build`, so the container needs no network at run time. On
+  top of that, `app/main.py`'s FastAPI `lifespan` calls `get_model()` during startup, so the model
+  is in memory before the server accepts traffic — the first `/recommendations` call is no longer
+  cold (that cold call used to blow past `MlServiceClient`'s 5s timeout and make the first
+  `rankBy=mealHistory` after a restart fall back). The healthcheck `start_period` is 90s to cover
+  the load on a small VM. Tradeoff (larger image, build-time network): see `ml-service/Dockerfile`;
+  the running-by-hand path still downloads on first use.
+- **`rankBy=mealHistory` now actually uses the ML signal.** Two bugs kept it permanently on the
+  fallback ordering, both found while verifying the compose stack (both pre-existing, not caused by
+  containerization):
+  1. `MlServiceClient` built its `WebClient` with a bare `WebClient.builder()`, whose Jackson codec
+     serialized `NutritionLog.loggedAt` (`LocalDateTime`) as a numeric array; `ml-service`'s
+     Pydantic `datetime` field rejected it with `422`. Fixed by giving that client's codecs an
+     `ObjectMapper` with `JavaTimeModule` registered and `WRITE_DATES_AS_TIMESTAMPS` disabled, so
+     `logged_at` goes out as an ISO-8601 string. `MlServiceClientTest` now pins the request-body
+     format.
+  2. The first `/recommendations` after an `ml-service` restart loaded the model lazily and
+     exceeded the client's 5s timeout — addressed by the startup preload above.
+  `RecipeService.rankByMealHistoryWithFallback` swallows any failure silently (by design — a search
+  must not fail because the ML service is down), which is why both bugs were invisible. The
+  empty-history path always worked.
+- **`db/init/008_users_seed.sql` seeds the default user (id 1).** `nutrition_log.user_id` has a FK
+  to `users(id)` and nothing created that row, so the documented `POST /api/nutrition/log
+  {"userId": 1, ...}` failed with a foreign-key violation on a fresh database. Now seeded on first
+  volume init, the same way `004_user_preference.sql` seeds its id-1 row. Existing volumes need it
+  applied by hand (see `docs/setup.md`).
+- **`java-backend` is published on loopback only.** `docker-compose.yml` now binds
+  `127.0.0.1:8080:8080` instead of all interfaces — on a server the API is reached through the
+  reverse proxy (`docs/deployment.md`), and `localhost:8080` still works for local dev.
+
 ## Recently fixed (2026-09-01)
 
 - **Inconsistent API response shape — resolved.** The API now uniformly returns **raw DTOs**;
@@ -69,13 +112,10 @@ passing while the real thing is broken) can easily recur:
   managed executor — so this config class does nothing. Either implement it (a dedicated executor
   bean, sized appropriately, wired via `@Async`) or delete it so it doesn't look like unfinished
   wiring.
-- **ml-service isn't containerized.** `ml-service/requirements.txt` is filled in and pinned, but
-  `ml-service/Dockerfile` is still an empty file and `docker-compose.yml` has no `ml-service`
-  entry — only Postgres comes up via compose. Run `ml-service` by hand with `uvicorn`. See
-  `docs/ml-service.md`.
-- **First ml-service startup needs network.** `sentence-transformers` downloads `all-MiniLM-L6-v2`
-  (~80 MB) from Hugging Face on first use and caches it under `~/.cache/huggingface`. A fully
-  offline first run of `pytest` or the first `/recommendations` call will fail.
+- **Running `ml-service` by hand still needs network on first use.** The *container* bakes the
+  model in (see "Recently fixed" above), but if you run `ml-service` directly with `uvicorn` (or
+  run `pytest`), `sentence-transformers` downloads `all-MiniLM-L6-v2` (~80 MB) from Hugging Face on
+  first use and caches it under `~/.cache/huggingface`. A fully offline first run that way fails.
 - **Meal-history ranking ignores recency.** `embed_meal_history` mean-pools every `nutrition_log`
   entry's name embedding with equal weight; `logged_at` is sent and parsed but unused. Also, like
   the rest of the recipe/nutrition endpoints, it's unscoped by `userId` (`findAll()`).

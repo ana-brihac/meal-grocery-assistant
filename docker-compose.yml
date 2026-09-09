@@ -1,3 +1,13 @@
+# Full local stack: Postgres + ml-service + java-backend.
+#
+# Requires a .env file in this directory (see .env.example) providing
+# USDA_API_KEY and OCR_API_KEY. docker-compose reads .env automatically for
+# ${VAR} substitution below.
+#
+#   docker compose up --build        # foreground, with build
+#   docker compose up -d --build     # detached
+#   docker compose down              # stop (keeps the Postgres volume)
+
 services:
   postgres:
     image: postgres:16
@@ -9,7 +19,62 @@ services:
       - "5432:5432"
     volumes:
       - pantry_pg_data:/var/lib/postgresql/data
+      # Applied only on first start against an empty data directory (see docs/setup.md).
       - ./db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pantrydb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ml-service:
+    build:
+      context: ./ml-service
+    image: meal-grocery-assistant-ml-service
+    # No host port published: only java-backend talks to it, over the compose
+    # network by service name.
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ping').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      # Startup loads the baked-in embedding model into memory before serving (app/main.py
+      # lifespan). No download, but torch import + model load can take a while on a small VM.
+      start_period: 90s
+      retries: 5
+
+  java-backend:
+    build:
+      context: ./java-backend
+    image: meal-grocery-assistant-java-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ml-service:
+        # Not service_healthy on purpose: MlServiceClient degrades gracefully if
+        # ml-service is down, so the backend must not be blocked waiting on it.
+        condition: service_started
+    environment:
+      # Spring relaxed-binding overrides for application.yml.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/pantrydb
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      ML_SERVICE_BASE_URL: http://ml-service:8000
+      # Passed through from the host .env — fail fast if they are not set.
+      OCR_API_KEY: ${OCR_API_KEY:?set OCR_API_KEY in .env (see .env.example)}
+      USDA_API_KEY: ${USDA_API_KEY:?set USDA_API_KEY in .env (see .env.example)}
+    ports:
+      # Loopback only: on a server the API is reached through the reverse proxy
+      # (see docs/deployment.md), never directly. Still reachable at
+      # localhost:8080 for local development.
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/inventory"]
+      interval: 15s
+      timeout: 5s
+      start_period: 45s
+      retries: 10
 
 volumes:
   pantry_pg_data:

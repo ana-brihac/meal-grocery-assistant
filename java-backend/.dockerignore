@@ -1,0 +1,5 @@
+# Keep the build context small: the Maven build inside the image produces its own target/.
+target/
+.mvn/wrapper/maven-wrapper.jar
+*.log
+logs/
