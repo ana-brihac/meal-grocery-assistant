@@ -1,0 +1,80 @@
+# CI — runs the automated test suites on every push and pull request.
+#
+# Added as part of the testing-coverage work (docs/known-issues.md: "No CI." / "ml-service has
+# no FastAPI-level tests and no CI."). Before this, `mvn test` and `pytest` only ran when
+# someone remembered to run them locally.
+#
+# Two independent jobs:
+#   * java-backend  -> mvn test   (JUnit 5 + Mockito, no Postgres needed — the suite is pure
+#                                  unit tests with mocked repositories; see docs/testing.md)
+#   * ml-service    -> pytest
+#
+# sentence-transformers model caching (docs/known-issues.md "First ml-service startup needs
+# network"): tests/test_recommendation_service.py loads the real `all-MiniLM-L6-v2` model, which
+# sentence-transformers downloads (~80 MB) from Hugging Face on first use and caches under
+# ~/.cache/huggingface. The "Cache Hugging Face model" step below persists that directory across
+# runs so only the first CI run (or the first after a 7-day idle cache eviction) pays the
+# download + is exposed to a Hugging Face outage.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "ana-brihac/**" # feature branches follow this naming convention
+  pull_request:
+
+jobs:
+  java-backend:
+    name: java-backend · mvn test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: java-backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21" # matches <java.version>21</java.version> in java-backend/pom.xml
+          cache: maven
+
+      - name: Run tests
+        run: mvn -B --no-transfer-progress test
+
+  ml-service:
+    name: ml-service · pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ml-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13" # matches the pinned wheels in ml-service/requirements.txt
+          cache: pip
+          cache-dependency-path: ml-service/requirements.txt
+
+      - name: Cache Hugging Face model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          # Static key — the model name is fixed (all-MiniLM-L6-v2, see
+          # ml-service/app/models/embedding_model.py). Bump the -v1 suffix if the model changes.
+          key: huggingface-all-MiniLM-L6-v2-v1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        # On a cache hit the model is already under ~/.cache/huggingface; on a miss pytest
+        # downloads it once and the cache step saves it for next time.
+        run: pytest -q

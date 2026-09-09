@@ -7,7 +7,9 @@ cd java-backend
 mvn test
 ```
 
-All tests are JUnit 5 + Mockito, no Spring context loaded (fast, no Postgres needed).
+All tests are JUnit 5 + Mockito with no Spring context (fast, no Postgres needed) — except
+`ApiErrorMappingTest`, a single `@WebMvcTest` slice that verifies the real HTTP error status
+codes. `mvn test` runs 195 tests.
 
 **What's actually covered:**
 
@@ -52,29 +54,30 @@ All tests are JUnit 5 + Mockito, no Spring context loaded (fast, no Postgres nee
   inventory covering everything returns an empty list; `setPurchased` toggles the flag and returns
   the refreshed list; `getGroceryList` reports `stale` when any row is stale.
 
-**What's not covered — these test files exist but are empty stubs, not placeholders with `@Disabled`
-or a TODO, just genuinely empty:**
+**Added in the testing-coverage pass** (`mvn test` is now 195 tests):
 
-- `InventoryServiceTest.java`
-- `ReceiptParserTest.java`
+- `InventoryServiceTest`, `ReceiptParserTest` — were genuinely empty, now real. `ReceiptParserTest`
+  leans on malformed / unexpected Gemini output (not-JSON, truncated, `null` literal,
+  `items`-not-array, non-numeric quantity aborting mid-loop, bare fence not stripped, ...).
+- `UserPreferenceServiceTest` — defaults fallback, single-row upsert, null-safe `mealPrepBatchSize`.
+- `MealPlanServiceTest` — orchestration only (candidate build, target snapshot, layout defaults +
+  overrides, slot persistence, `replaceSlot`, `selectForWeek`); the algorithm stays
+  `MealPlanOptimizerTest`'s job.
+- `NutritionServiceTest` `getDailyBreakdown` cases — zero-log days, range bounds, null macros,
+  recipe-name cache, rows `getSummary` filters out.
+- `GroceryListServiceTest` persistence cases — delete-then-insert ordering, exact persisted row
+  fields, regenerate drops `purchased`, cross-slot aggregation.
+- One `*ControllerTest` per controller (direct-invocation, no MockMvc): status code, raw-DTO body
+  shape, arg forwarding.
+- `ApiErrorMappingTest` — the one `@WebMvcTest` in the module; asserts the real HTTP status codes
+  and `application/problem+json` body from `GlobalExceptionHandler`.
 
-If you're picking up work in inventory or receipt parsing, there is currently **zero** automated
-coverage — don't assume a green `mvn test` says anything about those areas. `ReceiptParser` in
-particular has non-trivial logic (markdown-fence stripping, handling both bare-array and
-`{"items": [...]}` shapes, defaulting missing fields) that would benefit from tests given it's
-parsing untrusted LLM output.
+Still not covered (needs a real Postgres, outside the no-Spring-context unit setup):
+`RecipeDataLoader` and `RecipeRepository.findRecipesMakeableFrom` (custom `@Query` JPQL,
+file/classpath reading).
 
-Also uncovered, and with no empty stub file even flagging it: `UserPreferenceService` (defaults
-fallback, single-row upsert), `NutritionService.getSummary`'s recipe-sourced-entries gap, and
-`MealPlanService` orchestration (candidate build, target snapshot, save round-trips, `replaceSlot`,
-`selectForWeek`) — `MealPlanOptimizer` is covered directly but the service around it isn't.
-`GroceryListService` *is* covered (`GroceryListServiceTest`, above). `RecipeDataLoader` and
-`RecipeRepository.findRecipesMakeableFrom` also have no automated coverage — both need a real
-Postgres instance to test meaningfully (custom `@Query` JPQL, file/classpath reading), which is
-outside this repo's current no-Spring-context unit test setup.
-
-There is no CI configured (no `.github/workflows` or equivalent) — `mvn test` only runs when someone
-runs it locally.
+CI: `.github/workflows/ci.yml` runs `mvn test` and `pytest` on every PR and on pushes to `main`
+and `ana-brihac/**` branches.
 
 ## ml-service unit tests
 
@@ -90,10 +93,15 @@ recipes of different length (this one loads the real `all-MiniLM-L6-v2` model), 
 a candidate pointing the same direction as the history vector above one pointing the opposite way
 (asserts both order and the cosine values), and an empty candidate list returns `[]`.
 
-First run is **slow** — cold `torch`/`transformers` import plus a one-time ~80 MB model download
-from Hugging Face (needs network). After that it's a few seconds.
+`tests/test_recommendations_endpoint.py` — 13 `TestClient` tests of `POST /recommendations`:
+response-model shape, score-descending order over the wire, empty candidates / empty history,
+five request-validation 422s, extra-field tolerance, the router's `except -> 500 {"detail": ...}`
+mapping, and wrong-method 405. These monkeypatch the embedding layer, so they need no model
+download; `httpx` (pinned in `requirements.txt`) is required for `TestClient`.
 
-There are no FastAPI-level (`TestClient`) tests and no CI for `ml-service` either.
+First run of the *service* tests is **slow** — cold `torch`/`transformers` import plus a one-time
+~80 MB model download from Hugging Face (needs network). After that it's a few seconds. CI caches
+the model under `~/.cache/huggingface` (`actions/cache`), so only the first CI run pays it.
 
 ## Integration / manual verification
 

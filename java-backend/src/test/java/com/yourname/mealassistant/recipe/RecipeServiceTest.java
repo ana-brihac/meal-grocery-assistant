@@ -1,5 +1,6 @@
 package com.yourname.mealassistant.recipe;
 
+import com.yourname.mealassistant.common.exception.NotFoundException;
 import com.yourname.mealassistant.recipe.dto.RecipeDetailResponse;
 import com.yourname.mealassistant.recipe.dto.RecipeSearchRequest;
 import com.yourname.mealassistant.recipe.dto.RecipeSearchResponse;
@@ -156,6 +157,6 @@ class RecipeServiceTest {
 
         assertThatThrownBy(() -> service.updateRecipe(999L,
                 new RecipeUpsertRequest("x", null, null, List.of())))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(NotFoundException.class);
     }
 }

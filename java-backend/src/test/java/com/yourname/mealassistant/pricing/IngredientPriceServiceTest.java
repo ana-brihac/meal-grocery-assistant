@@ -1,6 +1,7 @@
 package com.yourname.mealassistant.pricing;
 
 import com.yourname.mealassistant.common.client.OcrClient;
+import com.yourname.mealassistant.common.exception.BadRequestException;
 import com.yourname.mealassistant.pricing.dto.AddPriceRequest;
 import com.yourname.mealassistant.pricing.dto.PriceTagPhotoResponse;
 import org.junit.jupiter.api.Test;
@@ -140,7 +141,7 @@ class IngredientPriceServiceTest {
     void addManualPrice_invalidMode_throws() {
         assertThatThrownBy(() ->
                 service.addManualPrice(new AddPriceRequest("egg", new BigDecimal("0.30"), "per_dozen", null)))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(BadRequestException.class);
     }
 
     // ---- estimateIngredientCost ----

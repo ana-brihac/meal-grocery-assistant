@@ -3,6 +3,7 @@ package com.yourname.mealassistant.nutrition;
 import com.yourname.mealassistant.common.client.NutritionAiClient;
 import com.yourname.mealassistant.common.client.NutritionApiClient;
 import com.yourname.mealassistant.common.client.dto.NutritionEstimate;
+import com.yourname.mealassistant.common.exception.NotFoundException;
 import com.yourname.mealassistant.common.util.ItemNameNormalizer;
 import com.yourname.mealassistant.nutrition.dto.DailyNutritionSummary;
 import com.yourname.mealassistant.nutrition.dto.LoggedMealEntry;
@@ -106,7 +107,7 @@ public class NutritionService {
     // cheap.
     public RecipeNutrition computeRecipeNutrition(Long recipeId, Double servings) {
         Recipe recipe = recipeRepository.findById(recipeId)
-                .orElseThrow(() -> new IllegalArgumentException("Recipe not found: " + recipeId));
+                .orElseThrow(() -> new NotFoundException("Recipe not found: " + recipeId));
 
         double totalCalories = 0;
         double totalProtein = 0;
@@ -151,7 +152,7 @@ public class NutritionService {
     // filters by userId, but they do appear in getDailyBreakdown, which doesn't filter by user.
     public void logRecipe(Long recipeId, Double servings) {
         Recipe recipe = recipeRepository.findById(recipeId)
-                .orElseThrow(() -> new IllegalArgumentException("Recipe not found: " + recipeId));
+                .orElseThrow(() -> new NotFoundException("Recipe not found: " + recipeId));
 
         List<RecipeIngredient> ingredients = recipeIngredientRepository.findByRecipeId(recipe.getId());
 

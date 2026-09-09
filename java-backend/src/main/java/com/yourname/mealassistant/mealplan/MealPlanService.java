@@ -1,5 +1,7 @@
 package com.yourname.mealassistant.mealplan;
 
+import com.yourname.mealassistant.common.exception.BadRequestException;
+import com.yourname.mealassistant.common.exception.NotFoundException;
 import com.yourname.mealassistant.grocerylist.GroceryListItem;
 import com.yourname.mealassistant.grocerylist.GroceryListRepository;
 import com.yourname.mealassistant.mealplan.dto.MealPlanRequest;
@@ -79,7 +81,7 @@ public class MealPlanService {
     // weekStartDate; the request may override days / mealTypes / servingsPerMeal.
     public MealPlanResponse generatePlan(MealPlanRequest request) {
         if (request == null || request.weekStartDate() == null) {
-            throw new IllegalArgumentException("weekStartDate is required");
+            throw new BadRequestException("weekStartDate is required");
         }
         int days = request.days() != null && request.days() > 0 ? request.days() : DEFAULT_DAYS;
         List<String> mealTypes = request.mealTypes() != null && !request.mealTypes().isEmpty()
@@ -128,7 +130,7 @@ public class MealPlanService {
 
     public MealPlanResponse getPlan(Long planId) {
         MealPlan plan = mealPlanRepository.findById(planId)
-                .orElseThrow(() -> new IllegalArgumentException("Meal plan not found: " + planId));
+                .orElseThrow(() -> new NotFoundException("Meal plan not found: " + planId));
         return toResponse(plan, mealPlanSlotRepository.findByMealPlanId(planId), List.of());
     }
 
@@ -137,10 +139,10 @@ public class MealPlanService {
     // recipe already used elsewhere in the plan; any grocery list for this plan is marked stale.
     public MealPlanResponse replaceSlot(Long planId, Long slotId, SlotReplacementRequest request) {
         MealPlan plan = mealPlanRepository.findById(planId)
-                .orElseThrow(() -> new IllegalArgumentException("Meal plan not found: " + planId));
+                .orElseThrow(() -> new NotFoundException("Meal plan not found: " + planId));
         List<MealPlanSlot> slots = mealPlanSlotRepository.findByMealPlanId(planId);
         MealPlanSlot target = slots.stream().filter(s -> s.getId().equals(slotId)).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Slot " + slotId + " is not in plan " + planId));
+                .orElseThrow(() -> new NotFoundException("Slot " + slotId + " is not in plan " + planId));
 
         Set<Long> extraExclude = request != null && request.excludeRecipeIds() != null
                 ? new HashSet<>(request.excludeRecipeIds()) : new HashSet<>();
@@ -161,10 +163,10 @@ public class MealPlanService {
     // left untouched.
     public MealPlanResponse selectForWeek(Long planId, SelectPlanRequest request) {
         if (request == null || request.weekStartDate() == null) {
-            throw new IllegalArgumentException("weekStartDate is required");
+            throw new BadRequestException("weekStartDate is required");
         }
         MealPlan source = mealPlanRepository.findById(planId)
-                .orElseThrow(() -> new IllegalArgumentException("Meal plan not found: " + planId));
+                .orElseThrow(() -> new NotFoundException("Meal plan not found: " + planId));
         List<MealPlanSlot> sourceSlots = mealPlanSlotRepository.findByMealPlanId(planId);
 
         UserPreference prefs = userPreferenceService.getPreferences();

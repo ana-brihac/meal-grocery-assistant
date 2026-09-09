@@ -1,5 +1,7 @@
 ml-service:
-  base-url: http://localhost:8000
+  # Overridable so the containerized backend can reach ml-service by its compose
+  # service name; defaults to localhost for a plain `mvn spring-boot:run`.
+  base-url: ${ML_SERVICE_BASE_URL:http://localhost:8000}
 
 spring:
   datasource:

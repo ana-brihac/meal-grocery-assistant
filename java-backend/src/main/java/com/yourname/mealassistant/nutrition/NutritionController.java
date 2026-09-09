@@ -1,6 +1,5 @@
 package com.yourname.mealassistant.nutrition;
 
-import com.yourname.mealassistant.common.dto.ApiResponse;
 import com.yourname.mealassistant.nutrition.dto.DailyNutritionSummary;
 import com.yourname.mealassistant.nutrition.dto.LogMealRequest;
 import com.yourname.mealassistant.nutrition.dto.LogRecipeRequest;
@@ -17,7 +16,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/nutrition")
 public class NutritionController {
-    
+
     private final NutritionService service;
 
     public NutritionController(NutritionService service) {
@@ -45,9 +44,9 @@ public class NutritionController {
     }
 
     @GetMapping("/calendar")
-    public ResponseEntity<ApiResponse<List<DailyNutritionSummary>>> getCalendar(
+    public ResponseEntity<List<DailyNutritionSummary>> getCalendar(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
-        return ResponseEntity.ok(ApiResponse.ok(service.getDailyBreakdown(start, end)));
+        return ResponseEntity.ok(service.getDailyBreakdown(start, end));
     }
 }

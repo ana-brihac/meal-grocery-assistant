@@ -1,8 +1,9 @@
 package com.yourname.mealassistant.receipt;
 
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import com.yourname.mealassistant.common.dto.ApiResponse;
+import com.yourname.mealassistant.common.exception.BadRequestException;
 
 
 @RestController
@@ -14,15 +15,20 @@ public class ReceiptController {
         this.receiptService = receiptService;
     }
 
+    // Fire-and-forget: the multipart file is read synchronously, then OCR/parse/save run in the
+    // background. Returns 202 Accepted immediately — there is no status endpoint to poll for the
+    // outcome (see docs/known-issues.md). An unreadable upload is a 400 before any hand-off.
     @PostMapping("/upload")
-    public ApiResponse<String> uploadReceipt(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<String> uploadReceipt(@RequestParam("file") MultipartFile file) {
+        byte[] fileBytes;
+        String contentType;
         try {
-            byte[] fileBytes = file.getBytes();
-            String contentType = file.getContentType();
-            receiptService.processReceiptAsync(fileBytes, contentType);
-            return ApiResponse.ok("Receipt uploaded and processing in background");
+            fileBytes = file.getBytes();
+            contentType = file.getContentType();
         } catch (Exception e) {
-            return ApiResponse.fail("Failed to read file: " + e.getMessage());
+            throw new BadRequestException("Failed to read file: " + e.getMessage(), e);
         }
+        receiptService.processReceiptAsync(fileBytes, contentType);
+        return ResponseEntity.accepted().body("Receipt uploaded and processing in background");
     }
 }

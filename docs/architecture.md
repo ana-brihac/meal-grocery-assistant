@@ -59,8 +59,8 @@ searches/edits recipes, and generates weekly meal plans that respect the user's 
 | `preference` | `UserPreference` entity (daily calorie/protein/fiber targets, weekly budget, meal-prep batch size), single-row read/upsert |
 | `common.client` | External HTTP clients: `OcrClient` (Gemini — receipts + price tags), `NutritionApiClient` (USDA), `NutritionAiClient` (Gemini nutrition fallback), `MlServiceClient` (`ml-service` `POST /recommendations`, `WebClient`, 5s timeout) |
 | `common.client.dto` | `RecommendationRequest`/`RecommendationResponse` (mirror `ml-service`'s Pydantic schemas), `NutritionEstimate` |
-| `common.dto` | `ApiResponse<T>` — success/data/error envelope (only used by some controllers, see below); `MissingIngredientPrice` — `{ingredientName, reason}` line item for the grocery list's un-priced ingredients |
-| `common.exception` | `GlobalExceptionHandler` — catches `NutritionApiException` → 502, everything else → 500 |
+| `common.dto` | `MissingIngredientPrice` — `{ingredientName, reason}` line item for the grocery list's un-priced ingredients. (The old `ApiResponse<T>` envelope was removed — controllers return raw DTOs; see below.) |
+| `common.exception` | `NotFoundException` (→ 404), `BadRequestException` (→ 400); `GlobalExceptionHandler` — `@RestControllerAdvice` that renders every error as an RFC 9457 `ProblemDetail`: `NotFoundException` → 404, `BadRequestException` → 400, `NutritionApiException` → 502, everything else → 500 (a bare `IllegalArgumentException` is left as 500 on purpose) |
 | `common.util` | `ItemNameNormalizer` — lowercases + strips quantity tokens (`1L`, `200g`, ...) from food names |
 | `config` | `WebClientConfig` (USDA WebClient bean), `AsyncConfig` (currently empty — see `docs/known-issues.md`) |
 
@@ -183,13 +183,12 @@ previous list for that plan and insert a fresh `grocery_list_item` set. `PATCH
 ingredient that couldn't be costed and why (`NO_PRICE_ON_FILE` / `NEEDS_GRAMS_PER_ITEM`) — it's
 reclassified on every grocery-list response, so it clears as the user adds prices and refetches.
 
-- `ApiResponse<T>` (`{success, data, error}`) is used by `ReceiptController`, `InventoryController`,
-  `UserPreferenceController`, `RecipeController`, `NutritionController`'s `/calendar` endpoint, and
-  all of the newer controllers (`PricingController`, `MealPlanController`, `GroceryListController`),
-  but **not** by `NutritionController`'s `/summary`/`/log`, `SpendingController`, or
-  `DashboardController`, which return raw DTOs or `ResponseEntity<Void>`. There's still no single
-  consistent response envelope across the API — check the specific endpoint you're calling, not
-  just the controller.
+- **Response shape is uniform: raw DTOs, no envelope.** Every controller returns its DTO (or
+  entity) directly — `ResponseEntity<T>` / `ResponseEntity<Void>`. The old `ApiResponse<T>`
+  `{success, data, error}` wrapper and `ApiResponse.java` are gone. Errors are RFC 9457
+  `ProblemDetail` from `GlobalExceptionHandler`. Create/async endpoints carry the status in the
+  HTTP code: `POST /api/mealplan/generate` and `POST /api/grocerylist/generate` → 201,
+  `POST /api/receipts/upload` → 202. See `docs/backend-api.md`.
 - Services are plain constructor-injected `@Service`/`@Component` beans, no interfaces, no
   builders — straightforward to read and extend.
 - `UserPreference` enforces its single-row assumption only in `UserPreferenceService` logic

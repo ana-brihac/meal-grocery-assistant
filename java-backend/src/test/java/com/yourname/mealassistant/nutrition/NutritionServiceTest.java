@@ -3,6 +3,7 @@ package com.yourname.mealassistant.nutrition;
 import com.yourname.mealassistant.common.client.NutritionAiClient;
 import com.yourname.mealassistant.common.client.NutritionApiClient;
 import com.yourname.mealassistant.common.client.dto.NutritionEstimate;
+import com.yourname.mealassistant.common.exception.NotFoundException;
 import com.yourname.mealassistant.nutrition.dto.DailyNutritionSummary;
 import com.yourname.mealassistant.nutrition.dto.NutritionSummaryResponse;
 import com.yourname.mealassistant.nutrition.dto.RecipeNutrition;
@@ -219,7 +220,7 @@ class NutritionServiceTest {
     void logRecipe_unknownRecipeId_throws() {
         when(recipeRepository.findById(999L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.logRecipe(999L, 1.0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.logRecipe(999L, 1.0)).isInstanceOf(NotFoundException.class);
     }
 
     // ---- getDailyBreakdown ----
@@ -282,5 +283,205 @@ class NutritionServiceTest {
         assertThat(result.getTotalCalories()).isEqualTo(330.0);
         // 31 * 2 = 62g protein
         assertThat(result.getTotalProtein()).isEqualTo(62.0);
+    }
+
+    // ---- getDailyBreakdown ----
+    //
+    // getDailyBreakdown uses nutritionLogRepository.findAll() (not a userId/date-scoped query —
+    // the still-open "no userId param" issue in known-issues.md; not fixed here). Every
+    // NutritionLog needs setLoggedAt(...) or log.getLoggedAt().toLocalDate() NPEs. Per-entry
+    // multiplier is quantityGrams / nutrition_info.base_quantity.
+
+    private static NutritionLog dayLog(String itemName, double grams, LocalDateTime at, Long recipeId) {
+        NutritionLog log = new NutritionLog();
+        log.setItemName(itemName);
+        log.setQuantityGrams(grams);
+        log.setLoggedAt(at);
+        log.setRecipeId(recipeId);
+        return log;
+    }
+
+    private static NutritionInfo info(String name, Double base, Double calories, Double protein, Double fibers) {
+        NutritionInfo i = new NutritionInfo();
+        i.setItemName(name);
+        i.setBaseQuantity(base);
+        i.setCalories(calories);
+        i.setProtein(protein);
+        i.setFibers(fibers);
+        return i;
+    }
+
+    @Test
+    void getDailyBreakdown_zeroLogDays_stillReturnedWithZeroTotalsAndEmptyEntries() {
+        when(nutritionLogRepository.findAll()).thenReturn(List.of());
+
+        List<DailyNutritionSummary> result =
+                service.getDailyBreakdown(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 3));
+
+        assertThat(result).hasSize(3);
+        assertThat(result).extracting(DailyNutritionSummary::date)
+                .containsExactly(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 2), LocalDate.of(2026, 8, 3));
+        assertThat(result).allSatisfy(d -> {
+            assertThat(d.totalCalories()).isEqualTo(0.0);
+            assertThat(d.totalProtein()).isEqualTo(0.0);
+            assertThat(d.totalFiber()).isEqualTo(0.0);
+            assertThat(d.entries()).isEmpty();
+        });
+    }
+
+    @Test
+    void getDailyBreakdown_singleDayRange_startEqualsEnd_returnsExactlyOneDay() {
+        LocalDate d = LocalDate.of(2026, 8, 15);
+        when(nutritionLogRepository.findAll())
+                .thenReturn(List.of(dayLog("chicken", 200.0, d.atTime(12, 0), null)));
+        when(nutritionInfoRepository.findById("chicken")).thenReturn(Optional.of(cachedChicken));
+
+        List<DailyNutritionSummary> result = service.getDailyBreakdown(d, d);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).date()).isEqualTo(d);
+        assertThat(result.get(0).entries()).hasSize(1);
+    }
+
+    @Test
+    void getDailyBreakdown_multipleLogsSameDay_totalsAreSummedWithPerEntryMultiplier() {
+        LocalDate d = LocalDate.of(2026, 8, 15);
+        when(nutritionLogRepository.findAll()).thenReturn(List.of(
+                dayLog("chicken", 200.0, d.atTime(8, 0), null),
+                dayLog("chicken", 50.0, d.atTime(19, 0), null)));
+        when(nutritionInfoRepository.findById("chicken")).thenReturn(Optional.of(cachedChicken));
+
+        DailyNutritionSummary day = service.getDailyBreakdown(d, d).get(0);
+
+        assertThat(day.entries()).hasSize(2);
+        // 165 kcal / 31 g protein per 100 g base; 200 g -> 2x, 50 g -> 0.5x
+        assertThat(day.totalCalories()).isEqualTo(165 * 2 + 165 * 0.5);
+        assertThat(day.totalProtein()).isEqualTo(31 * 2 + 31 * 0.5);
+        assertThat(day.entries()).extracting(e -> e.calories()).containsExactly(165 * 2.0, 165 * 0.5);
+    }
+
+    @Test
+    void getDailyBreakdown_logsOutsideTheRequestedRange_areExcluded() {
+        when(nutritionLogRepository.findAll()).thenReturn(List.of(
+                dayLog("chicken", 100.0, LocalDate.of(2026, 7, 31).atTime(12, 0), null),
+                dayLog("chicken", 100.0, LocalDate.of(2026, 8, 4).atTime(12, 0), null)));
+
+        List<DailyNutritionSummary> result =
+                service.getDailyBreakdown(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 3));
+
+        assertThat(result).hasSize(3);
+        assertThat(result).allSatisfy(d -> {
+            assertThat(d.entries()).isEmpty();
+            assertThat(d.totalCalories()).isEqualTo(0.0);
+        });
+    }
+
+    @Test
+    void getDailyBreakdown_logWithNoCachedNutritionInfo_isSkippedButDayStillPresent() {
+        LocalDate d = LocalDate.of(2026, 8, 15);
+        when(nutritionLogRepository.findAll())
+                .thenReturn(List.of(dayLog("mystery", 100.0, d.atTime(12, 0), null)));
+        when(nutritionInfoRepository.findById("mystery")).thenReturn(Optional.empty());
+
+        DailyNutritionSummary day = service.getDailyBreakdown(d, d).get(0);
+
+        assertThat(day.date()).isEqualTo(d);
+        assertThat(day.entries()).isEmpty();
+        assertThat(day.totalCalories()).isEqualTo(0.0);
+    }
+
+    @Test
+    void getDailyBreakdown_nutritionInfoWithNullMacros_contributesZeroNotNpe() {
+        LocalDate d = LocalDate.of(2026, 8, 15);
+        when(nutritionLogRepository.findAll())
+                .thenReturn(List.of(dayLog("water", 500.0, d.atTime(12, 0), null)));
+        when(nutritionInfoRepository.findById("water"))
+                .thenReturn(Optional.of(info("water", 100.0, null, null, null)));
+
+        DailyNutritionSummary day = service.getDailyBreakdown(d, d).get(0);
+
+        assertThat(day.entries()).hasSize(1);
+        assertThat(day.entries().get(0).calories()).isEqualTo(0.0);
+        assertThat(day.entries().get(0).protein()).isEqualTo(0.0);
+        assertThat(day.entries().get(0).fiber()).isEqualTo(0.0);
+        assertThat(day.totalCalories()).isEqualTo(0.0);
+    }
+
+    @Test
+    void getDailyBreakdown_manuallyLoggedEntry_hasNullRecipeIdAndRecipeName() {
+        LocalDate d = LocalDate.of(2026, 8, 15);
+        when(nutritionLogRepository.findAll())
+                .thenReturn(List.of(dayLog("chicken", 100.0, d.atTime(12, 0), null)));
+        when(nutritionInfoRepository.findById("chicken")).thenReturn(Optional.of(cachedChicken));
+
+        DailyNutritionSummary day = service.getDailyBreakdown(d, d).get(0);
+
+        assertThat(day.entries().get(0).recipeId()).isNull();
+        assertThat(day.entries().get(0).recipeName()).isNull();
+        verify(recipeRepository, never()).findById(any());
+    }
+
+    @Test
+    void getDailyBreakdown_sameRecipeIdAcrossMultipleDays_resolvesRecipeNameOnce() {
+        Recipe recipe = new Recipe();
+        recipe.setId(10L);
+        recipe.setName("Tomato Pasta");
+
+        NutritionInfo pastaInfo = info("pasta", 100.0, 200.0, 7.0, 3.0);
+        when(nutritionLogRepository.findAll()).thenReturn(List.of(
+                dayLog("pasta", 100.0, LocalDate.of(2026, 8, 15).atTime(12, 0), 10L),
+                dayLog("pasta", 100.0, LocalDate.of(2026, 8, 16).atTime(12, 0), 10L)));
+        when(nutritionInfoRepository.findById("pasta")).thenReturn(Optional.of(pastaInfo));
+        when(recipeRepository.findById(10L)).thenReturn(Optional.of(recipe));
+
+        List<DailyNutritionSummary> result =
+                service.getDailyBreakdown(LocalDate.of(2026, 8, 15), LocalDate.of(2026, 8, 16));
+
+        assertThat(result.get(0).entries().get(0).recipeName()).isEqualTo("Tomato Pasta");
+        assertThat(result.get(1).entries().get(0).recipeName()).isEqualTo("Tomato Pasta");
+        verify(recipeRepository, times(1)).findById(10L);
+    }
+
+    @Test
+    void getDailyBreakdown_recipeIdWithNoRecipeRow_leavesRecipeNameNullButKeepsRecipeId() {
+        LocalDate d = LocalDate.of(2026, 8, 15);
+        when(nutritionLogRepository.findAll())
+                .thenReturn(List.of(dayLog("pasta", 100.0, d.atTime(12, 0), 99L)));
+        when(nutritionInfoRepository.findById("pasta"))
+                .thenReturn(Optional.of(info("pasta", 100.0, 200.0, 7.0, 3.0)));
+        when(recipeRepository.findById(99L)).thenReturn(Optional.empty());
+
+        DailyNutritionSummary day = service.getDailyBreakdown(d, d).get(0);
+
+        assertThat(day.entries().get(0).recipeId()).isEqualTo(99L);
+        assertThat(day.entries().get(0).recipeName()).isNull();
+    }
+
+    @Test
+    void getDailyBreakdown_endBeforeStart_returnsEmptyList() {
+        when(nutritionLogRepository.findAll()).thenReturn(List.of());
+
+        assertThat(service.getDailyBreakdown(LocalDate.of(2026, 8, 10), LocalDate.of(2026, 8, 1)))
+                .isEmpty();
+    }
+
+    @Test
+    void getDailyBreakdown_includesRecipeSourcedRowsThatGetSummaryWouldFilterOut() {
+        Recipe recipe = new Recipe();
+        recipe.setId(10L);
+        recipe.setName("Tomato Pasta");
+
+        LocalDate d = LocalDate.of(2026, 8, 15);
+        // user_id null, recipeId set — the shape NutritionService.logRecipe writes.
+        when(nutritionLogRepository.findAll())
+                .thenReturn(List.of(dayLog("pasta", 400.0, d.atTime(12, 0), 10L)));
+        when(nutritionInfoRepository.findById("pasta"))
+                .thenReturn(Optional.of(info("pasta", 100.0, 200.0, 7.0, 3.0)));
+        when(recipeRepository.findById(10L)).thenReturn(Optional.of(recipe));
+
+        DailyNutritionSummary day = service.getDailyBreakdown(d, d).get(0);
+
+        assertThat(day.entries()).hasSize(1);
+        assertThat(day.totalCalories()).isEqualTo(200 * 4.0);
     }
 }
