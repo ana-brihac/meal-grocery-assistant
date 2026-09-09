@@ -12,9 +12,13 @@ them.
   Central API for nutrition lookups, to Gemini for receipt OCR / price-tag OCR / a last-resort
   nutrition estimate, and to `ml-service` for recipe recommendations.
 - **ml-service** — Python / FastAPI. Hosts `POST /recommendations`: ranks candidate recipes by
-  sentence-transformers embedding similarity to the user's logged meal history. Run directly with
-  `uvicorn` — not containerized yet. See `docs/ml-service.md`.
+  sentence-transformers embedding similarity to the user's logged meal history. Containerized
+  (`ml-service/Dockerfile` bakes the model in and preloads it at startup); comes up with the rest
+  of the stack. See `docs/ml-service.md`.
 - **Postgres 16** — primary datastore, schema-managed via the SQL scripts in `db/init`.
+
+All three services run together with `docker compose up --build`. Deploying to a VM behind nginx +
+HTTPS: `docs/deployment.md`.
 
 ## Project layout
 
@@ -27,7 +31,7 @@ docs/           Architecture and setup notes
 
 ## Setup
 
-1. Create a `.env` file in the repo root:
+1. Create a `.env` file in the repo root (`cp .env.example .env`, then fill in real values):
 
    ```
    USDA_API_KEY=your_usda_api_key_here
@@ -39,34 +43,27 @@ docs/           Architecture and setup notes
    `OCR_API_KEY` is a Gemini API key, used for receipt parsing, shelf price-tag OCR, and the
    fallback nutrition estimate when USDA has no match for an ingredient.
 
-2. Start Postgres:
-
-   ```
-   docker-compose up -d postgres
-   ```
-
-   This applies every script in `db/init/` (`001_init_schema.sql` through
-   `007_user_preference_mealprep.sql`) on first boot. If you're reusing an existing `pantry_pg_data`
-   volume from before one of these tables existed, its init script won't rerun automatically — apply
-   the new ones by hand against the running container (see `docs/setup.md`), or recreate the volume
-   with `docker-compose down -v`.
-
-3. Add a recipe dataset at `java-backend/src/main/resources/data/recipes.csv` (one row per
+2. Add a recipe dataset at `java-backend/src/main/resources/data/recipes.csv` (one row per
    ingredient — see `RecipeDataLoader.java` for the exact column format). The app boots without it,
    but recipe search and meal-plan generation have nothing to work with until it's present. It loads
-   automatically on the next backend startup, once (won't reload or duplicate on later restarts —
+   automatically on the first backend startup, once (won't reload or duplicate on later restarts —
    clear the `recipes` / `recipe_ingredients` tables to re-import). Recipes can also be added and
    edited at runtime via `POST` / `PUT /api/recipes`.
 
-4. Run the backend from `java-backend/`:
+3. Bring up the stack:
 
    ```
-   mvn spring-boot:run
+   docker compose up --build
    ```
 
-   Reads `USDA_API_KEY` and `OCR_API_KEY` from the environment (export them, or use an env-file
-   runner). Defaults to `jdbc:postgresql://localhost:5432/pantrydb` and port 8080 — override the
-   port with `SERVER_PORT` if 8080 is taken locally.
+   Postgres + `ml-service` + `java-backend`, on `127.0.0.1:8080`. On first boot Postgres applies
+   every script in `db/init/` (`001_init_schema.sql` through `008_users_seed.sql`). If you're
+   reusing an older `pantry_pg_data` volume, new scripts won't rerun — apply them by hand or
+   recreate the volume with `docker compose down -v` (see `docs/setup.md`).
+
+   To iterate on the backend outside a container, run `docker compose up -d postgres` and then
+   `mvn spring-boot:run` from `java-backend/` (export `USDA_API_KEY` / `OCR_API_KEY` — `mvn` doesn't
+   read `.env`).
 
 ## API
 

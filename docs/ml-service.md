@@ -5,8 +5,9 @@
 `ml-service/` is a FastAPI app with two routes:
 
 - `POST /recommendations` — the recipe-recommendation endpoint (real).
-- `GET /ping` — a leftover connectivity check: `{"status": "ok", "service": "python"}`. Nothing
-  calls it any more (the Java side stopped using it) — safe to delete whenever.
+- `GET /ping` — a cheap liveness check: `{"status": "ok", "service": "python"}`. The Java side no
+  longer calls it, but the container healthcheck (compose + Dockerfile `HEALTHCHECK`) does, so it's
+  load-bearing now — don't remove it.
 
 There is **no database access** here. `ml-service` is a pure function: it receives candidate recipes
 and meal history in the request body, embeds them, scores them, and returns a ranked list.
@@ -79,7 +80,10 @@ webClient.post().uri("/recommendations")
 ```
 
 Java DTOs `common/client/dto/RecommendationRequest.java` / `RecommendationResponse.java` mirror the
-Pydantic schemas field-for-field (including `@JsonProperty("meal_history")` / `("logged_at")`).
+Pydantic schemas field-for-field (including `@JsonProperty("meal_history")` / `("logged_at")`). The
+client configures its JSON codec with `JavaTimeModule` and `WRITE_DATES_AS_TIMESTAMPS` disabled so
+`logged_at` is sent as an ISO-8601 string — a plain `WebClient` serializes `LocalDateTime` as a
+numeric array, which the Pydantic `datetime` field rejects with `422`.
 
 Call path: `RecipeService.searchRecipes` (when `rankBy=mealHistory`) →
 `RecipeRankingService.rankByMealHistorySimilarity` assembles candidates from
@@ -90,9 +94,20 @@ Call path: `RecipeService.searchRecipes` (when `rankBy=mealHistory`) →
 `RecipeService.rankByMealHistoryWithFallback` catches it and falls back to the default
 fewest-ingredients ordering. `/api/recipes/search` never fails just because `ml-service` is down.
 
-Base URL: `ml-service.base-url` in `application.yml`, default `http://localhost:8000`.
+Base URL: `ml-service.base-url` in `application.yml` — `${ML_SERVICE_BASE_URL:http://localhost:8000}`.
+The compose stack sets `ML_SERVICE_BASE_URL=http://ml-service:8000`; a plain `mvn spring-boot:run`
+falls back to `localhost:8000`.
 
-## Running it locally
+## Running it
+
+It's containerized (`ml-service/Dockerfile`) and comes up with the rest of the stack via
+`docker compose up --build` — no host port is published; `java-backend` reaches it at
+`http://ml-service:8000` on the compose network. The image **bakes `all-MiniLM-L6-v2` in at build
+time** and `app/main.py`'s FastAPI `lifespan` **preloads it into memory at startup**, so the
+container needs no network at run time and the first `/recommendations` call is not cold. The
+bake-vs-lazy-download tradeoff is documented in the Dockerfile.
+
+To run it standalone on the host (e.g. while editing the recommendation code):
 
 ```
 cd ml-service
@@ -121,26 +136,22 @@ Expect a `results` array of two `{id,name,score}` objects, id 1 scoring higher.
 
 ## Tests
 
-`tests/test_recommendation_service.py` (pytest, from `ml-service/`):
+`pytest` (from `ml-service/`) — 16 tests across two files:
 
-- `test_embedding_produces_consistent_length_vectors` — two recipes of different length embed to the
-  same shape (loads the real model).
-- `test_recommend_ranks_similar_recipe_higher_than_dissimilar` — hand-picked vectors; asserts order
-  and cosine values (1.0 / -1.0).
-- `test_recommend_handles_empty_candidate_list` — returns `[]`.
+- `tests/test_recommendation_service.py` — the service functions directly: embedding shape,
+  cosine ordering (1.0 / -1.0), empty candidate list → `[]`.
+- `tests/test_recommendations_endpoint.py` — `TestClient` against `POST /recommendations`: the
+  `RecommendationResponse` shape, score-descending order, the router's `Exception → HTTP 500`
+  mapping, and request-validation `422`s (missing fields, non-numeric quantity, bad `logged_at`).
 
 ```
 cd ml-service && pytest -q
 ```
 
-First run is slow (cold torch/transformers import + one-time model download); subsequent runs are
-fast. `requirements.txt` versions are all pinned.
+`.github/workflows/ci.yml` runs this on every PR and on pushes to `main` / `ana-brihac/**`, with the
+model restored from an `actions/cache`. First local run is slow (cold torch/transformers import +
+one-time model download); subsequent runs are fast. `requirements.txt` versions are all pinned.
 
 ## Still not done
 
-- `ml-service/Dockerfile` is an **empty file**, and `docker-compose.yml` has no `ml-service` entry —
-  the service can't be brought up as part of the stack, only run by hand. Decide on a base image,
-  fill in the Dockerfile, add a compose service.
-- No FastAPI-level tests (`TestClient` against `POST /recommendations`) — only the service functions
-  are tested directly. The Java `MlServiceClientTest` covers the HTTP round-trip from the other side.
 - No recency weighting on meal history; `logged_at` is parsed but unused.
